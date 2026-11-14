@@ -1,0 +1,9 @@
+node_modules
+.next
+out
+.env
+.env.local
+.neon
+npm-debug.log*
+.neon
+*.tsbuildinfo

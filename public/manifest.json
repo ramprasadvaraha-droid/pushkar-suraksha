@@ -1,0 +1,16 @@
+{
+  "id": "/",
+  "name": "Pushkar Suraksha",
+  "short_name": "Suraksha",
+  "description": "Family safety for Pushkaram in Andhra Pradesh",
+  "lang": "en-IN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFF8E7",
+  "theme_color": "#7A1C1C",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
