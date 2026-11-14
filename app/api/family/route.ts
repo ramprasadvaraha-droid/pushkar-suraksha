@@ -7,6 +7,7 @@ interface FamilyRow {
   id: string;
   family_name: string;
   phone: string;
+  alternative_phone: string | null;
   district: string;
   family_number: string;
   verification_hint: string;
@@ -37,7 +38,7 @@ export async function GET() {
 
   try {
     const { rows: families } = await query<FamilyRow>(
-      `select id, family_name, phone, district, family_number, verification_hint, created_at
+      `select id, family_name, phone, alternative_phone, district, family_number, verification_hint, created_at
        from public.families where owner_id = $1 order by created_at desc limit 1`,
       [user.id],
     );

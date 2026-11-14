@@ -26,8 +26,6 @@ export function PWARegister() {
           if (controlledByAppWorker && window.sessionStorage.getItem(reloadKey) !== "true") {
             window.sessionStorage.setItem(reloadKey, "true");
             window.location.reload();
-          } else if (!controlledByAppWorker) {
-            window.sessionStorage.removeItem(reloadKey);
           }
         })
         .catch((error: unknown) => {

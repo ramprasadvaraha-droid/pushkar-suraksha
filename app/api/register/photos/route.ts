@@ -14,6 +14,7 @@ interface FamilyRow {
   id: string;
   family_name: string;
   phone: string;
+  alternative_phone: string | null;
   district: string;
   family_number: string;
   verification_hint: string;
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
 
   try {
     const { rows: familyRows } = await query<FamilyRow>(
-      `select id, family_name, phone, district, family_number, verification_hint
+      `select id, family_name, phone, alternative_phone, district, family_number, verification_hint
        from public.families where id = $1 and owner_id = $2`,
       [body.familyId, user.id],
     );

@@ -7,9 +7,9 @@ type VolunteerStatus = "pending" | "approved" | "rejected";
 
 interface VolunteerProfileRow {
   id: string;
-  email: string;
+  email: string | null;
   fullName: string;
-  phone: string;
+  phone: string | null;
   status: VolunteerStatus;
   createdAt: string;
 }
@@ -25,7 +25,7 @@ export async function GET() {
   if (!user) return apiError("Session expired. Please sign in again.", 401);
 
   try {
-    const email = user.email?.trim().toLowerCase() ?? "";
+    const email = user.emailVerified === true ? user.email?.trim().toLowerCase() ?? "" : "";
     const { rows: [profile] } = await query<VolunteerProfileRow>(
       `select id, email, full_name as "fullName", phone, status, created_at as "createdAt"
        from public.volunteers where auth_user_id = $1`,
@@ -59,31 +59,39 @@ export async function POST(request: Request) {
   if (!isServerConfigured()) return apiError("Server configuration is incomplete. Check the README environment setup.", 503);
   const user = await getAuthenticatedUser();
   if (!user) return apiError("Session expired. Please sign in again.", 401);
-  if (user.emailVerified !== true) {
-    return apiError("Verify your email address with an email code before volunteer registration.", 403);
+  if (user.emailVerified !== true && user.phoneNumberVerified !== true) {
+    return apiError("Verify your email address or mobile number before volunteer registration.", 403);
   }
   if (!getVolunteerOrganizerEmails().length) {
     return apiError("Volunteer organizer access is not configured. Contact the festival coordinator.", 503);
   }
 
-  let body: { fullName?: string; phone?: string };
+  let body: { fullName?: string };
   try {
     body = await request.json();
   } catch {
     return apiError("Volunteer registration details could not be read.");
   }
-  const fullName = body.fullName?.trim() ?? "";
-  const phone = body.phone?.trim() ?? "";
+  const fullName = typeof body.fullName === "string" ? body.fullName.trim() : "";
   if (fullName.length < 2 || fullName.length > 100) {
     return apiError("Enter your full name (2 to 100 characters).");
   }
-  if (!/^[6-9]\d{9}$/.test(phone)) {
-    return apiError("Enter a valid 10-digit Indian mobile number.");
+  const email = user.emailVerified === true ? user.email?.trim().toLowerCase() ?? null : null;
+  const authenticatedPhone = user.phoneNumberVerified === true
+    ? user.phoneNumber?.replace(/^\+91/, "") ?? null
+    : null;
+  if (user.emailVerified === true && !email) {
+    return apiError("Your verified sign-in account does not have an email address.", 400);
+  }
+  if (!email && !authenticatedPhone) {
+    return apiError("Your account must have a verified email or mobile number.", 403);
   }
 
-  const email = user.email?.trim().toLowerCase() ?? "";
-  if (!email) return apiError("Your sign-in account does not have an email address.", 400);
-  const organizer = isVolunteerOrganizer(email);
+  if (authenticatedPhone && !/^[6-9]\d{9}$/.test(authenticatedPhone)) {
+    return apiError("Your verified sign-in account does not have a valid mobile number.", 400);
+  }
+  const phone = authenticatedPhone;
+  const organizer = email ? isVolunteerOrganizer(email) : false;
 
   try {
     const { rows: [profile] } = await query<VolunteerProfileRow>(

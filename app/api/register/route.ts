@@ -15,6 +15,7 @@ export async function POST(request: Request) {
   let body: {
     familyName?: string;
     phone?: string;
+    alternativePhone?: string | null;
     district?: string;
     secret?: string;
     members?: MemberInput[];
@@ -27,8 +28,12 @@ export async function POST(request: Request) {
   if (!body.familyName?.trim() || body.familyName.trim().length > 100 ||
       !body.district?.trim() || body.district.trim().length > 80 ||
       !body.phone || !/^[6-9]\d{9}$/.test(body.phone) ||
+      (body.alternativePhone !== undefined && body.alternativePhone !== null &&
+        (typeof body.alternativePhone !== "string" ||
+          !/^[6-9]\d{9}$/.test(body.alternativePhone) ||
+          body.alternativePhone === body.phone)) ||
       !body.secret?.trim() || body.secret.trim().length < 3 || body.secret.trim().length > 120) {
-    return apiError("Check the family name, 10-digit phone number, district, and verification secret.");
+    return apiError("Check the family name, primary and alternative mobile numbers, district, and verification secret.");
   }
   if (!Array.isArray(body.members) || body.members.length < 1 || body.members.length > 9) {
     return apiError("Add between 1 and 9 family members.");
@@ -44,6 +49,7 @@ export async function POST(request: Request) {
 
   const familyName = body.familyName.trim();
   const phone = body.phone;
+  const alternativePhone = body.alternativePhone || null;
   const district = body.district.trim();
   const secret = body.secret.trim();
   const members = body.members;
@@ -79,18 +85,19 @@ export async function POST(request: Request) {
         id: string;
         family_name: string;
         phone: string;
+        alternative_phone: string | null;
         district: string;
       }>(
         `insert into public.families (
-           owner_id, family_name, phone, district, family_number, verification_secret_hash, verification_hint
+           owner_id, family_name, phone, alternative_phone, district, family_number, verification_secret_hash, verification_hint
          )
          values (
-           $1, $2, $3, $4, $5,
-           crypt(encode(digest(lower(trim($6)), 'sha256'), 'hex'), gen_salt('bf')),
-           left(trim($6), 1) || '•••'
+           $1, $2, $3, $4, $5, $6,
+           crypt(encode(digest(lower(trim($7)), 'sha256'), 'hex'), gen_salt('bf')),
+           left(trim($7), 1) || '•••'
          )
-         returning id, family_name, phone, district`,
-        [user.id, familyName, phone, district, familyNumber, secret],
+         returning id, family_name, phone, alternative_phone, district`,
+        [user.id, familyName, phone, alternativePhone, district, familyNumber, secret],
       );
 
       const createdMembers = [];

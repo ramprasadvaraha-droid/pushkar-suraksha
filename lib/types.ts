@@ -22,6 +22,7 @@ export interface FamilyRecord {
   id: string;
   family_name: string;
   phone: string;
+  alternative_phone: string | null;
   district: string;
   family_number: string;
   members: MemberRecord[];

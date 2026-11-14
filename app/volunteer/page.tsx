@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { EmailSignIn } from "@/components/EmailSignIn";
+import { AccountSignIn } from "@/components/AccountSignIn";
 import { PasswordResetForm } from "@/components/PasswordResetForm";
 import { authClient } from "@/lib/auth/client";
 import { LanguageSwitcher, useLanguage, type Translator } from "@/lib/i18n";
@@ -20,9 +20,9 @@ interface MissingItem {
 
 interface VolunteerProfile {
   id: string;
-  email: string;
+  email: string | null;
   fullName: string;
-  phone: string;
+  phone: string | null;
   status: "pending" | "approved" | "rejected";
   createdAt: string;
 }
@@ -34,9 +34,9 @@ interface HandoverCounts {
 
 interface PendingVolunteer {
   id: string;
-  email: string;
+  email: string | null;
   fullName: string;
-  phone: string;
+  phone: string | null;
   createdAt: string;
 }
 
@@ -71,6 +71,8 @@ export default function VolunteerPage() {
   const { t, language } = useLanguage();
   const [profile, setProfile] = useState<VolunteerProfile | null>(null);
   const [signedIn, setSignedIn] = useState(false);
+  const [authName, setAuthName] = useState("");
+  const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [organizerConfigured, setOrganizerConfigured] = useState(false);
   const [counts, setCounts] = useState<HandoverCounts | null>(null);
@@ -160,8 +162,13 @@ export default function VolunteerPage() {
       try {
         const { data, error: sessionError } = await authClient.getSession();
         if (sessionError) throw new Error(sessionError.message ?? "Could not restore sign-in.");
-        if (data?.user) {
-          if (active) setSignedIn(true);
+        const user = data?.user;
+        if (user && (user.emailVerified || user.phoneNumberVerified)) {
+          if (active) {
+            setAuthName(user.name);
+            setAuthEmail(user.emailVerified ? user.email : null);
+            setSignedIn(true);
+          }
           await refreshProfile(true);
         }
       } catch (cause) {
@@ -196,13 +203,12 @@ export default function VolunteerPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fullName: form.get("fullName"),
-          phone: form.get("phone"),
         }),
       });
       const body = await response.json() as { error?: string };
       if (!response.ok) throw new Error(body.error ?? "Volunteer registration could not be submitted.");
       await refreshProfile(true);
-      setShowPasswordSetup(true);
+      setShowPasswordSetup(Boolean(authEmail));
     } catch (cause) {
       setError(errorText(cause, t));
     } finally {
@@ -305,6 +311,8 @@ export default function VolunteerPage() {
     } finally {
       setSignedIn(false);
       setProfile(null);
+      setAuthName("");
+      setAuthEmail(null);
       setIsOrganizer(false);
       setCounts(null);
       setPendingApprovals([]);
@@ -340,10 +348,17 @@ export default function VolunteerPage() {
 
         {!authReady && <div className="empty-note">{t("Checking volunteer session...")}</div>}
         {authReady && !signedIn && (
-          <EmailSignIn
+          <AccountSignIn
             title={t("Volunteer sign-in")}
             allowPassword
-            onAuthenticated={() => {
+            allowSignUp
+            allowPhone
+            phonePassword
+            signUpCallbackURL="/volunteer"
+            signUpPrompt="New volunteer? Create an account"
+            onAuthenticated={(account) => {
+              setAuthName(account.name);
+              setAuthEmail(account.email);
               setLoading(true);
               setError("");
               void refreshProfile(true)
@@ -357,14 +372,10 @@ export default function VolunteerPage() {
           <>
             <form className="pin-panel" onSubmit={(event) => void register(event)}>
               <h2>{t("Volunteer registration")}</h2>
-              <p>{t("Register your name and mobile number. An organizer must approve your account before you can access missing-person reports.")}</p>
+              <p>{t("Submit your verified account for organizer approval before you can access missing-person reports.")}</p>
               <label className="field">
                 <span>{t("Full name")}</span>
-                <input name="fullName" required minLength={2} maxLength={100} autoComplete="name" />
-              </label>
-              <label className="field">
-                <span>{t("Mobile number")} <small>{t("10-digit India mobile")}</small></span>
-                <input name="phone" required inputMode="numeric" autoComplete="tel-national" maxLength={10} pattern="[6-9][0-9]{9}" />
+                <input name="fullName" required minLength={2} maxLength={100} autoComplete="name" defaultValue={authName} />
               </label>
               {!organizerConfigured && <div className="alert alert-error" role="alert">{t("Volunteer organizer emails are not configured. Contact the festival coordinator.")}</div>}
               <button className="button button-primary" type="submit" disabled={registering || !organizerConfigured}>
@@ -387,11 +398,11 @@ export default function VolunteerPage() {
           </div>
         )}
 
-        {signedIn && profile && (
+        {signedIn && profile && authEmail && (
           <div className="volunteer-password-setup">
             {showPasswordSetup ? (
               <PasswordResetForm
-                initialEmail={profile.email}
+                initialEmail={profile.email ?? authEmail}
                 allowEmailChange={false}
                 onCancel={() => setShowPasswordSetup(false)}
               />
@@ -543,8 +554,8 @@ function OrganizerApprovals({
       {pending.map((volunteer) => (
         <article className="approval-card" key={volunteer.id}>
           <strong>{volunteer.fullName}</strong>
-          <span>{volunteer.email}</span>
-          <a href={`tel:${volunteer.phone}`}>+91 {volunteer.phone}</a>
+          {volunteer.email && <span>{volunteer.email}</span>}
+          {volunteer.phone && <a href={`tel:${volunteer.phone}`}>+91 {volunteer.phone}</a>}
           <small>{t("Requested {date}", { date: new Date(volunteer.createdAt).toLocaleString(language === "te" ? "te-IN" : "en-IN") })}</small>
           <div className="approval-actions">
             <button className="button button-primary" type="button" disabled={reviewingId === volunteer.id} onClick={() => onReview(volunteer.id, "approved")}>{t("Approve")}</button>

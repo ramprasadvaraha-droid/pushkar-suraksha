@@ -2,9 +2,9 @@ import { query } from "@/lib/db";
 
 export interface ApprovedVolunteer {
   id: string;
-  email: string;
+  email: string | null;
   fullName: string;
-  phone: string;
+  phone: string | null;
 }
 
 export function getVolunteerOrganizerEmails(): string[] {

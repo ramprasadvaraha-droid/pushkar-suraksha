@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { EmailSignIn } from "@/components/EmailSignIn";
+import { AccountSignIn } from "@/components/AccountSignIn";
 import { DeleteFamilyPhotos } from "@/components/DeleteFamilyPhotos";
 import { MemberCard } from "@/components/MemberCard";
 import { NumberBadge } from "@/components/NumberBadge";
@@ -50,14 +50,16 @@ function NavIcon({ type }: { type: Tab }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[type]} /></svg>;
 }
 
-function RegistrationForm({ onRegistered, busy, onBusyChange }: {
+function RegistrationForm({ onRegistered, busy, onBusyChange, initialPhone }: {
   onRegistered: (family: FamilyRecord, secretHint: string) => void;
   busy: boolean;
   onBusyChange: (busy: boolean) => void;
+  initialPhone: string;
 }) {
   const { t } = useLanguage();
   const [familyName, setFamilyName] = useState("Ramulu Family");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(initialPhone);
+  const [alternativePhone, setAlternativePhone] = useState("");
   const [district, setDistrict] = useState("East Godavari");
   const [secret, setSecret] = useState("");
   const [members, setMembers] = useState<RegistrationMember[]>([
@@ -76,6 +78,10 @@ function RegistrationForm({ onRegistered, busy, onBusyChange }: {
     setError("");
     if (!/^[6-9]\d{9}$/.test(phone)) {
       setError(t("Valid 10-digit Indian mobile number required."));
+      return;
+    }
+    if (alternativePhone && (!/^[6-9]\d{9}$/.test(alternativePhone) || alternativePhone === phone)) {
+      setError(t("Enter a different valid alternative mobile number, or leave it blank."));
       return;
     }
     if (secret.trim().length < 3) {
@@ -102,7 +108,7 @@ function RegistrationForm({ onRegistered, busy, onBusyChange }: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          familyName, phone, district, secret,
+          familyName, phone, alternativePhone: alternativePhone || null, district, secret,
           members: members.map(({ name, age, relation, gender }) => ({ name, age, relation, gender })),
         }),
       });
@@ -171,6 +177,14 @@ function RegistrationForm({ onRegistered, busy, onBusyChange }: {
           <div className="phone-input"><span>+91</span><input
             required inputMode="numeric" autoComplete="tel-national" maxLength={10} value={phone}
             onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))}
+            placeholder="98765 43210"
+          /></div>
+        </label>
+        <label className="field">
+          <span>{t("Alternative mobile number")} <small>{t("Optional")}</small></span>
+          <div className="phone-input"><span>+91</span><input
+            inputMode="numeric" autoComplete="tel-national" maxLength={10} value={alternativePhone}
+            onChange={(event) => setAlternativePhone(event.target.value.replace(/\D/g, "").slice(0, 10))}
             placeholder="98765 43210"
           /></div>
         </label>
@@ -504,6 +518,7 @@ export default function HomePage() {
   const [authReady, setAuthReady] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [signedInEmail, setSignedInEmail] = useState("");
+  const [signedInPhone, setSignedInPhone] = useState("");
   const [family, setFamily] = useState<FamilyRecord | null>(null);
   const [secretHint, setSecretHint] = useState("•••");
   const [loading, setLoading] = useState(true);
@@ -517,11 +532,13 @@ export default function HomePage() {
     void authClient.getSession().then(({ data, error }) => {
       if (error) throw new Error(error.message);
       if (active) {
-        const hasUser = Boolean(data?.user);
-        setSignedIn(hasUser);
-        setSignedInEmail(data?.user?.email ?? "");
+        const user = data?.user;
+        const hasVerifiedIdentity = Boolean(user && (user.emailVerified || user.phoneNumberVerified));
+        setSignedIn(hasVerifiedIdentity);
+        setSignedInEmail(user?.emailVerified ? user.email : "");
+        setSignedInPhone(user?.phoneNumberVerified ? user.phoneNumber ?? "" : "");
         setAuthReady(true);
-        if (!hasUser) setLoading(false);
+        if (!hasVerifiedIdentity) setLoading(false);
       }
     }).catch((cause: unknown) => {
       if (active) {
@@ -572,6 +589,7 @@ export default function HomePage() {
     setFamily(null);
     setSecretHint("•••");
     setSignedInEmail("");
+    setSignedInPhone("");
     setShowPasswordSetup(false);
     setSignedIn(false);
   }
@@ -602,18 +620,20 @@ export default function HomePage() {
                 {loading && <div className="empty-note">{t("Secure family details are loading...")}</div>}
                 {visibleConfigError && <div className="alert alert-error" role="alert"><strong>{t("App setup needed")}</strong><br />{t(visibleConfigError)}</div>}
                 {authReady && !signedIn && !visibleConfigError && (
-                  <EmailSignIn
+                  <AccountSignIn
                     allowPassword
                     allowSignUp
-                    onAuthenticated={(email) => {
+                    allowPhone
+                    onAuthenticated={(account) => {
                       setConfigError("");
                       setLoading(true);
-                      setSignedInEmail(email);
+                      setSignedInEmail(account.email ?? "");
+                      setSignedInPhone(account.phoneNumber ?? "");
                       setSignedIn(true);
                     }}
                   />
                 )}
-                {signedIn && (
+                {signedIn && signedInEmail && (
                   <div className="family-password-setup">
                     {showPasswordSetup ? (
                       <PasswordResetForm
@@ -632,6 +652,7 @@ export default function HomePage() {
                   <RegistrationForm
                     busy={busy}
                     onBusyChange={setBusy}
+                    initialPhone={signedInPhone.replace(/^\+91/, "")}
                     onRegistered={(record, hint) => { setFamily(record); setSecretHint(hint); setCelebrate(true); }}
                   />
                 )}
@@ -639,7 +660,13 @@ export default function HomePage() {
                   <div className="screen-stack">
                     <div className="family-summary">
                       <NumberBadge number={family.family_number} label={t("Family number · Family no.")} />
-                      <div className="summary-meta"><span>{family.district}</span><a href={`tel:${family.phone}`}>+91 {family.phone}</a></div>
+                      <div className="summary-meta">
+                        <span>{family.district}</span>
+                        <a href={`tel:${family.phone}`}>+91 {family.phone}</a>
+                        {family.alternative_phone && (
+                          <a href={`tel:${family.alternative_phone}`}>{t("Alternative")}: +91 {family.alternative_phone}</a>
+                        )}
+                      </div>
                     </div>
                     <div className="section-caption"><h2>{t("Member slips")}</h2><span>{family.members.length} {t("members")}</span></div>
                     {family.members.map((member, index) => (

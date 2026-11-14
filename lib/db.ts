@@ -4,7 +4,7 @@ type SqlValue = string | number | boolean | null | Date | string[];
 
 const globalForPool = globalThis as typeof globalThis & { pushkarDbPool?: Pool };
 
-function getPool(): Pool {
+export function getPool(): Pool {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error("Neon is not configured. Add DATABASE_URL to the server environment.");

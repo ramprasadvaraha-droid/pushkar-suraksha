@@ -5,9 +5,9 @@ import { isVolunteerOrganizer } from "@/lib/volunteer-access";
 
 interface PendingVolunteer {
   id: string;
-  email: string;
+  email: string | null;
   fullName: string;
-  phone: string;
+  phone: string | null;
   createdAt: string;
 }
 
