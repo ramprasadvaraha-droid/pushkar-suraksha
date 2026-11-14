@@ -7,47 +7,31 @@ import { useLanguage } from "@/lib/i18n";
 
 interface AuthenticatedAccount {
   name: string;
-  email: string | null;
-  phoneNumber: string | null;
-  emailVerified: boolean;
-  phoneNumberVerified: boolean;
+  email: string;
 }
 
-type Mode =
-  | "email-signup"
-  | "email-verification"
-  | "email-password"
-  | "email-otp"
-  | "phone-verification"
-  | "reset";
+type Mode = "email-signup" | "email-verification" | "email-password" | "email-otp" | "reset";
 
 export function AccountSignIn({
   onAuthenticated,
   title,
   allowPassword = false,
   allowSignUp = false,
-  allowPhone = false,
-  phonePassword = false,
-  signUpCallbackURL,
   signUpPrompt,
 }: {
   onAuthenticated: (account: AuthenticatedAccount) => void;
   title?: string;
   allowPassword?: boolean;
   allowSignUp?: boolean;
-  allowPhone?: boolean;
-  phonePassword?: boolean;
-  signUpCallbackURL?: string;
   signUpPrompt?: string;
 }) {
   const { t } = useLanguage();
   const signInTitle = title ?? t("Family sign-in");
   const [name, setName] = useState("");
-  const [identifier, setIdentifier] = useState("");
+  const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [sent, setSent] = useState(false);
   const [mode, setMode] = useState<Mode>(allowSignUp ? "email-signup" : "email-password");
-  const [phoneReturnMode, setPhoneReturnMode] = useState<Mode>("email-signup");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -61,29 +45,15 @@ export function AccountSignIn({
     setNotice("");
   }
 
-  const isPhoneIdentifier = allowPhone && /^\+?[\d\s().-]+$/.test(identifier.trim()) && /\d/.test(identifier);
-
-  function normalizedPhone() {
-    const digits = identifier.replace(/\D/g, "");
-    const nationalNumber = digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits;
-    return `+91${nationalNumber}`;
-  }
-
-  async function completeSignIn(preferredName?: string) {
+  async function completeSignIn() {
     const { data, error: sessionError } = await authClient.getSession();
     if (sessionError) throw new Error(sessionError.message ?? "Could not restore your sign-in.");
     const user = data?.user;
-    if (!user || (!user.emailVerified && !user.phoneNumberVerified)) {
-      throw new Error("Verify your email address or mobile number before continuing.");
+    if (!user?.emailVerified) {
+      throw new Error("Verify your email address before continuing.");
     }
 
-    onAuthenticated({
-      name: preferredName || user.name,
-      email: user.emailVerified ? user.email : null,
-      phoneNumber: user.phoneNumberVerified ? user.phoneNumber ?? null : null,
-      emailVerified: user.emailVerified,
-      phoneNumberVerified: Boolean(user.phoneNumberVerified),
-    });
+    onAuthenticated({ name: user.name, email: user.email });
   }
 
   async function createEmailAccount(event: FormEvent<HTMLFormElement>) {
@@ -94,24 +64,19 @@ export function AccountSignIn({
     try {
       const { data, error: signUpError } = await authClient.signUp.email({
         name: name.trim(),
-        email: identifier.trim(),
+        email: email.trim(),
         password,
-        ...(signUpCallbackURL && {
-          callbackURL: `${window.location.origin}${signUpCallbackURL}`,
-        }),
       });
       if (signUpError) throw new Error(signUpError.message ?? "Could not create account. Please try again.");
       if (!data?.user) throw new Error("Could not create account. Please try again.");
 
-      const { data: sessionData, error: sessionError } = await authClient.getSession();
-      if (sessionError) throw new Error(sessionError.message ?? "Could not restore your sign-in.");
-      if (sessionData?.user?.emailVerified) {
+      if (data.user.emailVerified) {
         await completeSignIn();
         return;
       }
 
       setMode("email-verification");
-      setNotice("Check your email for a verification link, then return here.");
+      setNotice("Check your email for a verification code.");
     } catch (cause) {
       setError(cause instanceof Error && cause.message ? cause.message : "Could not create account. Please try again.");
     } finally {
@@ -119,14 +84,45 @@ export function AccountSignIn({
     }
   }
 
-  async function checkEmailVerification(event: FormEvent<HTMLFormElement>) {
+  async function verifyEmailCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setBusy(true);
     try {
-      await completeSignIn();
+      const { data, error: verificationError } = await authClient.emailOtp.verifyEmail({
+        email: email.trim(),
+        otp: otp.trim(),
+      });
+      if (verificationError) throw new Error(verificationError.message ?? "Could not verify your email.");
+      if (!data?.user.emailVerified) throw new Error("Email verification was not completed.");
+
+      const { data: sessionData, error: sessionError } = await authClient.getSession();
+      if (sessionError) throw new Error(sessionError.message ?? "Could not restore your sign-in.");
+      if (sessionData?.user?.emailVerified) {
+        await completeSignIn();
+      } else {
+        changeMode("email-password");
+        setNotice("Email verified. Sign in with your password.");
+      }
     } catch (cause) {
       setError(cause instanceof Error && cause.message ? cause.message : "Could not verify your email.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendVerificationCode() {
+    setError("");
+    setBusy(true);
+    try {
+      const { error: sendError } = await authClient.emailOtp.sendVerificationOtp({
+        email: email.trim(),
+        type: "email-verification",
+      });
+      if (sendError) throw new Error(sendError.message ?? "Could not send the verification code.");
+      setNotice("A new verification code was sent to your email.");
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : "Could not send the verification code.");
     } finally {
       setBusy(false);
     }
@@ -138,7 +134,7 @@ export function AccountSignIn({
     setBusy(true);
     try {
       const { error: sendError } = await authClient.emailOtp.sendVerificationOtp({
-        email: identifier.trim(),
+        email: email.trim(),
         type: "sign-in",
       });
       if (sendError) throw new Error(sendError.message ?? "Could not send the sign-in code.");
@@ -150,91 +146,19 @@ export function AccountSignIn({
     }
   }
 
-  async function verifyEmailCode(event: FormEvent<HTMLFormElement>) {
+  async function verifySignInCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setBusy(true);
     try {
       const { error: signInError } = await authClient.signIn.emailOtp({
-        email: identifier.trim(),
+        email: email.trim(),
         otp: otp.trim(),
-        name: name.trim() || undefined,
       });
       if (signInError) throw new Error(signInError.message ?? "Could not verify the sign-in code.");
       await completeSignIn();
     } catch (cause) {
       setError(cause instanceof Error && cause.message ? cause.message : "Could not verify the sign-in code.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function sendPhoneCode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    const digits = identifier.replace(/\D/g, "");
-    const nationalNumber = digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits;
-    if (!/^[6-9]\d{9}$/.test(nationalNumber)) {
-      setError("Valid 10-digit Indian mobile number required.");
-      return;
-    }
-    setBusy(true);
-    try {
-      if (mode === "email-signup" || mode === "email-password" || mode === "email-otp") {
-        setPhoneReturnMode(mode);
-      }
-      const { error: sendError } = await authClient.phoneNumber.sendOtp({
-        phoneNumber: normalizedPhone(),
-      });
-      if (sendError) throw new Error(sendError.message ?? "Could not send the mobile verification code.");
-      setMode("phone-verification");
-      setOtp("");
-      setNotice("A verification code was sent to your mobile number.");
-    } catch (cause) {
-      setError(cause instanceof Error && cause.message ? cause.message : "Could not send the mobile verification code.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function verifyPhoneCode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      const { error: verificationError } = await authClient.phoneNumber.verify({
-        phoneNumber: normalizedPhone(),
-        code: otp.trim(),
-      });
-      if (verificationError) throw new Error(verificationError.message ?? "Could not verify the mobile number.");
-      if (name.trim() && !phonePassword) {
-        const { error: updateError } = await authClient.updateUser({ name: name.trim() });
-        if (updateError) throw new Error(updateError.message ?? "Could not save your name.");
-      }
-      if (phonePassword && phoneReturnMode === "email-signup") {
-        const response = await fetch("/api/volunteer/password", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ newPassword: password }),
-        });
-        const body = await response.json() as { passwordAlreadySet?: boolean; error?: string };
-        if (response.status === 409 && body.passwordAlreadySet) {
-          const { error: signInError } = await authClient.signIn.phoneNumber({
-            phoneNumber: normalizedPhone(),
-            password,
-          });
-          if (signInError) {
-            await authClient.signOut();
-            setMode("email-password");
-            throw new Error("This mobile number already has an account. Sign in with its existing password.");
-          }
-        } else if (!response.ok) {
-          throw new Error(body.error ?? "Could not set your password.");
-        }
-      }
-      await completeSignIn(phonePassword ? name.trim() : undefined);
-    } catch (cause) {
-      setError(cause instanceof Error && cause.message ? cause.message : "Could not verify the mobile number.");
     } finally {
       setBusy(false);
     }
@@ -246,25 +170,7 @@ export function AccountSignIn({
     setBusy(true);
     try {
       const { error: signInError } = await authClient.signIn.email({
-        email: identifier.trim(),
-        password,
-      });
-      if (signInError) throw new Error(signInError.message ?? "Could not sign in with that password.");
-      await completeSignIn();
-    } catch (cause) {
-      setError(cause instanceof Error && cause.message ? cause.message : "Could not sign in with that password.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function signInWithPhonePassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      const { error: signInError } = await authClient.signIn.phoneNumber({
-        phoneNumber: normalizedPhone(),
+        email: email.trim(),
         password,
       });
       if (signInError) throw new Error(signInError.message ?? "Could not sign in with that password.");
@@ -279,35 +185,29 @@ export function AccountSignIn({
   if (mode === "reset") {
     return (
       <PasswordResetForm
-        initialEmail={identifier.trim()}
+        initialEmail={email.trim()}
         onCancel={() => changeMode("email-password")}
       />
     );
   }
 
   const isEmailVerification = mode === "email-verification";
+  const isOtpSignIn = mode === "email-otp";
 
   return (
     <form
       className="pin-panel"
       onSubmit={(event) => {
-        if (allowPhone && isPhoneIdentifier && mode !== "phone-verification" && mode !== "email-verification") {
-          if (phonePassword && mode === "email-password") void signInWithPhonePassword(event);
-          else void sendPhoneCode(event);
-        }
-        else if (mode === "email-signup") void createEmailAccount(event);
-        else if (mode === "email-verification") void checkEmailVerification(event);
+        if (mode === "email-signup") void createEmailAccount(event);
+        else if (isEmailVerification) void verifyEmailCode(event);
         else if (mode === "email-password") void signInWithPassword(event);
-        else if (mode === "email-otp") void (sent ? verifyEmailCode(event) : sendEmailCode(event));
-        else if (mode === "phone-verification") void verifyPhoneCode(event);
+        else if (isOtpSignIn) void (sent ? verifySignInCode(event) : sendEmailCode(event));
       }}
     >
       <h2>
-        {isPhoneIdentifier || mode === "phone-verification" ? t("Mobile sign-in or registration")
+        {isEmailVerification ? t("Verify your email")
           : mode === "email-signup" ? t("Create your account")
-          : mode === "email-verification" ? t("Verify your email")
-            : mode === "email-password" ? signInTitle
-              : sent ? t("Enter your email code") : signInTitle}
+            : isOtpSignIn && sent ? t("Enter your email code") : signInTitle}
       </h2>
 
       {notice && <div className="alert alert-info" role="status">{t(notice)}</div>}
@@ -326,21 +226,21 @@ export function AccountSignIn({
       )}
       {!isEmailVerification && (
         <label className="field">
-          <span>{t(allowPhone ? "Email or mobile number" : "Email address")}</span>
+          <span>{t("Email address")}</span>
           <input
             required
-            type={allowPhone && isPhoneIdentifier ? "tel" : "email"}
-            inputMode={isPhoneIdentifier ? "tel" : "email"}
-            autoComplete={isPhoneIdentifier ? "tel" : "email"}
+            type="email"
+            inputMode="email"
+            autoComplete="email"
             maxLength={254}
-            readOnly={mode === "phone-verification"}
-            value={identifier}
-            onChange={(event) => setIdentifier(event.target.value)}
-            placeholder={allowPhone ? "you@example.com or 98765 43210" : "you@example.com"}
+            readOnly={isOtpSignIn && sent}
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.com"
           />
         </label>
       )}
-      {mode === "email-otp" && sent && !isPhoneIdentifier && (
+      {(isEmailVerification || (isOtpSignIn && sent)) && (
         <label className="field">
           <span>{t("One-time code")}</span>
           <input
@@ -353,7 +253,7 @@ export function AccountSignIn({
           />
         </label>
       )}
-      {mode === "email-signup" && (!isPhoneIdentifier || phonePassword) && (
+      {mode === "email-signup" && (
         <label className="field">
           <span>{t("Password")} <small>{t("8–128 characters")}</small></span>
           <input
@@ -367,7 +267,7 @@ export function AccountSignIn({
           />
         </label>
       )}
-      {mode === "email-password" && (!isPhoneIdentifier || phonePassword) && (
+      {mode === "email-password" && (
         <label className="field">
           <span>{t("Password")}</span>
           <input
@@ -380,33 +280,19 @@ export function AccountSignIn({
           />
         </label>
       )}
-      {mode === "phone-verification" && (
-        <label className="field">
-          <span>{t("One-time code")}</span>
-          <input
-            required
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={10}
-            value={otp}
-            onChange={(event) => setOtp(event.target.value)}
-          />
-        </label>
-      )}
       {error && <div className="field-error" role="alert">{t(error)}</div>}
       <div className="pin-row">
         <button className="button button-primary" type="submit" disabled={busy}>
           {busy ? t("Please wait...")
-            : mode === "email-signup" && isPhoneIdentifier ? t("Send mobile code")
-              : mode === "email-signup" ? t("Create account")
-              : mode === "email-verification" ? t("I verified my email")
+            : mode === "email-signup" ? t("Create account")
+              : isEmailVerification ? t("Verify & continue")
                 : mode === "email-password" ? t("Sign in")
-                  : mode === "email-otp" ? isPhoneIdentifier ? t("Send mobile code") : sent ? t("Verify & sign in") : t("Send sign-in code")
-                      : t("Verify & continue")}
+                  : isOtpSignIn ? sent ? t("Verify & sign in") : t("Send sign-in code")
+                    : t("Continue")}
         </button>
       </div>
       <div className="sign-in-options">
-        {allowPassword && mode === "email-password" && !isPhoneIdentifier && (
+        {allowPassword && mode === "email-password" && (
           <>
             <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("reset")}>
               {t("Set or reset password")}
@@ -416,17 +302,7 @@ export function AccountSignIn({
             </button>
           </>
         )}
-        {allowPassword && phonePassword && isPhoneIdentifier && mode === "email-password" && (
-          <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("email-otp")}>
-            {t("Use mobile code")}
-          </button>
-        )}
-        {allowPassword && mode === "email-otp" && !isPhoneIdentifier && (
-          <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("email-password")}>
-            {t("Use password")}
-          </button>
-        )}
-        {allowPassword && phonePassword && isPhoneIdentifier && mode === "email-otp" && (
+        {allowPassword && isOtpSignIn && (
           <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("email-password")}>
             {t("Use password")}
           </button>
@@ -436,22 +312,22 @@ export function AccountSignIn({
             {t("Already have an account? Sign in")}
           </button>
         )}
-        {allowSignUp && (mode === "email-password" || mode === "email-otp") && (
+        {allowSignUp && (mode === "email-password" || isOtpSignIn) && (
           <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("email-signup")}>
             {t(signUpPrompt ?? "New family? Create an account")}
           </button>
         )}
         {isEmailVerification && (
-          <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("email-password")}>
-            {t("Back to sign in")}
-          </button>
+          <>
+            <button className="text-button" type="button" disabled={busy} onClick={() => void resendVerificationCode()}>
+              {t("Resend verification code")}
+            </button>
+            <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("email-password")}>
+              {t("Back to sign in")}
+            </button>
+          </>
         )}
-        {mode === "phone-verification" && (
-          <button className="text-button" type="button" disabled={busy} onClick={() => changeMode(phoneReturnMode)}>
-            {t("Change email or mobile number")}
-          </button>
-        )}
-        {mode === "email-otp" && sent && (
+        {isOtpSignIn && sent && (
           <button className="text-button" type="button" disabled={busy} onClick={() => { setSent(false); setOtp(""); setError(""); }}>
             {t("Change email")}
           </button>

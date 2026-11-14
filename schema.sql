@@ -1,57 +1,5 @@
 create extension if not exists pgcrypto;
 
-create table if not exists "user" (
-  "id" text not null primary key,
-  "name" text not null,
-  "email" text not null unique,
-  "emailVerified" boolean not null,
-  "image" text,
-  "createdAt" timestamptz default current_timestamp not null,
-  "updatedAt" timestamptz default current_timestamp not null,
-  "phoneNumber" text unique,
-  "phoneNumberVerified" boolean
-);
-
-create table if not exists "session" (
-  "id" text not null primary key,
-  "expiresAt" timestamptz not null,
-  "token" text not null unique,
-  "createdAt" timestamptz default current_timestamp not null,
-  "updatedAt" timestamptz not null,
-  "ipAddress" text,
-  "userAgent" text,
-  "userId" text not null references "user" ("id") on delete cascade
-);
-
-create table if not exists "account" (
-  "id" text not null primary key,
-  "accountId" text not null,
-  "providerId" text not null,
-  "userId" text not null references "user" ("id") on delete cascade,
-  "accessToken" text,
-  "refreshToken" text,
-  "idToken" text,
-  "accessTokenExpiresAt" timestamptz,
-  "refreshTokenExpiresAt" timestamptz,
-  "scope" text,
-  "password" text,
-  "createdAt" timestamptz default current_timestamp not null,
-  "updatedAt" timestamptz not null
-);
-
-create table if not exists "verification" (
-  "id" text not null primary key,
-  "identifier" text not null,
-  "value" text not null,
-  "expiresAt" timestamptz not null,
-  "createdAt" timestamptz default current_timestamp not null,
-  "updatedAt" timestamptz default current_timestamp not null
-);
-
-create index if not exists "session_userId_idx" on "session" ("userId");
-create index if not exists "account_userId_idx" on "account" ("userId");
-create index if not exists "verification_identifier_idx" on "verification" ("identifier");
-
 create table if not exists public.families (
   id uuid primary key default gen_random_uuid(),
   owner_id text not null,
@@ -111,9 +59,9 @@ create table if not exists public.missing_logs (
 create table if not exists public.volunteers (
   id uuid primary key default gen_random_uuid(),
   auth_user_id text not null unique,
-  email text,
+  email text not null,
   full_name text not null check (length(trim(full_name)) between 2 and 100),
-  phone text not null check (phone ~ '^[6-9][0-9]{9}$'),
+  phone text check (phone is null or phone ~ '^[6-9][0-9]{9}$'),
   status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
   created_at timestamptz not null default now(),
   reviewed_at timestamptz,
@@ -121,8 +69,7 @@ create table if not exists public.volunteers (
   check (
     (status = 'pending' and reviewed_at is null and reviewed_by is null)
     or (status in ('approved', 'rejected') and reviewed_at is not null and reviewed_by is not null)
-  ),
-  check (email is not null or phone is not null)
+  )
 );
 
 create table if not exists public.volunteer_handover_verifications (

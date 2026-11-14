@@ -518,7 +518,6 @@ export default function HomePage() {
   const [authReady, setAuthReady] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [signedInEmail, setSignedInEmail] = useState("");
-  const [signedInPhone, setSignedInPhone] = useState("");
   const [family, setFamily] = useState<FamilyRecord | null>(null);
   const [secretHint, setSecretHint] = useState("•••");
   const [loading, setLoading] = useState(true);
@@ -533,10 +532,9 @@ export default function HomePage() {
       if (error) throw new Error(error.message);
       if (active) {
         const user = data?.user;
-        const hasVerifiedIdentity = Boolean(user && (user.emailVerified || user.phoneNumberVerified));
+        const hasVerifiedIdentity = Boolean(user?.emailVerified);
         setSignedIn(hasVerifiedIdentity);
         setSignedInEmail(user?.emailVerified ? user.email : "");
-        setSignedInPhone(user?.phoneNumberVerified ? user.phoneNumber ?? "" : "");
         setAuthReady(true);
         if (!hasVerifiedIdentity) setLoading(false);
       }
@@ -589,7 +587,6 @@ export default function HomePage() {
     setFamily(null);
     setSecretHint("•••");
     setSignedInEmail("");
-    setSignedInPhone("");
     setShowPasswordSetup(false);
     setSignedIn(false);
   }
@@ -623,12 +620,10 @@ export default function HomePage() {
                   <AccountSignIn
                     allowPassword
                     allowSignUp
-                    allowPhone
                     onAuthenticated={(account) => {
                       setConfigError("");
                       setLoading(true);
                       setSignedInEmail(account.email ?? "");
-                      setSignedInPhone(account.phoneNumber ?? "");
                       setSignedIn(true);
                     }}
                   />
@@ -652,7 +647,7 @@ export default function HomePage() {
                   <RegistrationForm
                     busy={busy}
                     onBusyChange={setBusy}
-                    initialPhone={signedInPhone.replace(/^\+91/, "")}
+                    initialPhone=""
                     onRegistered={(record, hint) => { setFamily(record); setSecretHint(hint); setCelebrate(true); }}
                   />
                 )}

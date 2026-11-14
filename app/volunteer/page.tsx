@@ -163,10 +163,10 @@ export default function VolunteerPage() {
         const { data, error: sessionError } = await authClient.getSession();
         if (sessionError) throw new Error(sessionError.message ?? "Could not restore sign-in.");
         const user = data?.user;
-        if (user && (user.emailVerified || user.phoneNumberVerified)) {
+        if (user?.emailVerified) {
           if (active) {
             setAuthName(user.name);
-            setAuthEmail(user.emailVerified ? user.email : null);
+            setAuthEmail(user.email);
             setSignedIn(true);
           }
           await refreshProfile(true);
@@ -208,7 +208,7 @@ export default function VolunteerPage() {
       const body = await response.json() as { error?: string };
       if (!response.ok) throw new Error(body.error ?? "Volunteer registration could not be submitted.");
       await refreshProfile(true);
-      setShowPasswordSetup(Boolean(authEmail));
+      setShowPasswordSetup(false);
     } catch (cause) {
       setError(errorText(cause, t));
     } finally {
@@ -352,9 +352,6 @@ export default function VolunteerPage() {
             title={t("Volunteer sign-in")}
             allowPassword
             allowSignUp
-            allowPhone
-            phonePassword
-            signUpCallbackURL="/volunteer"
             signUpPrompt="New volunteer? Create an account"
             onAuthenticated={(account) => {
               setAuthName(account.name);
