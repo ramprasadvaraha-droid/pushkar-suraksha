@@ -35,6 +35,12 @@ This app no longer uses Supabase. Existing Supabase projects, data, Auth identit
 
 The registration form starts with **Ramulu Family** as an editable family-name example. On a fresh database the first family number is `PK-FAM-0842`; later four-digit numbers are randomly allocated under a database lock, with a unique constraint preventing duplicates. Each member receives a unique number such as `PK-08421`.
 
+## Deploy to Vercel
+
+Link this repository to a Vercel project and set these production environment variables from the linked Neon branch and your organizer configuration: `DATABASE_URL`, `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `VOLUNTEER_ADMIN_EMAILS`, and `CRON_SECRET`. Keep all credentials server-only; do not use `NEXT_PUBLIC_` names for them.
+
+The `vercel.json` configuration runs `/api/maintenance/cleanup` daily at 00:00 India Standard Time (18:30 UTC). Vercel sends `CRON_SECRET` in the authorization header for this scheduled request.
+
 ## Neon setup and operational requirements
 
 - Families can sign in with their email and password after setting one from the Family screen. First-time access and password setup or recovery use a Neon Auth email one-time code. The same email restores access on another device; keep the printed member slips as a backup. Neon Auth has no anonymous-user sign-in, so family registration and private family APIs require an authenticated session.
@@ -43,7 +49,7 @@ The registration form starts with **Ramulu Family** as an editable family-name e
 - The family verification secret is stored as a password hash; the slip shows only its first-character hint. An approved volunteer must verify the guardian's secret before the parent's phone number is revealed. The volunteer must then explicitly confirm the physical handover. Only that final confirmation increments the volunteer's personal count and the event total, updates the found board, and removes the member from the active missing list. A verification claim is held for up to 15 minutes.
 - The public found board intentionally returns only member number, face photo, and found ghat; parent phone is returned only after an authorized, verified volunteer action.
 - Families can permanently delete all of their stored photos from the Family screen by checking the confirmation box and choosing **Delete all photos**. This removes the Neon Storage objects and photo metadata while leaving family/member records intact. Copies already saved on personal or volunteer devices are not removed.
-- Photos are marked to expire on September 30, 2027 at 11:59 PM India time. Configure a daily scheduler to `GET /api/maintenance/cleanup` with `Authorization: Bearer <CRON_SECRET>`; the endpoint removes expired objects from Neon Object Storage before deleting their Neon metadata. The cutoff only takes effect automatically once this schedule is configured on the app host.
+- Photos are marked to expire on September 30, 2027 at 11:59 PM India time. The Vercel cron schedule calls `GET /api/maintenance/cleanup` daily with `Authorization: Bearer <CRON_SECRET>`; the endpoint removes expired objects from Neon Object Storage before deleting their Neon metadata. On other app hosts, configure an equivalent daily scheduler.
 - Volunteer missing-list JSON and recently loaded private photo links are cached locally for offline identification. The service worker keys the list cache to the approved volunteer profile, stores no parent phone/name in that list, expires offline photo entries after 12 hours, and clears both caches on volunteer logout. Use a managed device and log out when finished.
 - Face and blur checks run on the device before upload. The browser's native `FaceDetector` is required; current Chromium browsers support it, while browsers without it receive an explicit message to use Chrome. The focus check is a client-side quality heuristic, not a medical-grade or forensic identity check.
 - Serve the app over HTTPS in production; service-worker install and camera capture require a secure context. Review Neon backups, storage retention, volunteer access, and local child-photo handling before festival deployment.
