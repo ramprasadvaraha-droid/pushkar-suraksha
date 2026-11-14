@@ -9,21 +9,34 @@ export function EmailSignIn({
   onAuthenticated,
   title,
   allowPassword = false,
+  allowSignUp = false,
 }: {
   onAuthenticated: (email: string) => void;
   title?: string;
   allowPassword?: boolean;
+  allowSignUp?: boolean;
 }) {
   const { t } = useLanguage();
   const signInTitle = title ?? t("Family sign-in");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [sent, setSent] = useState(false);
-  const [mode, setMode] = useState<"otp" | "password" | "reset">(allowPassword ? "password" : "otp");
+  const [mode, setMode] = useState<"signup" | "verification" | "otp" | "password" | "reset">(
+    allowSignUp ? "signup" : allowPassword ? "password" : "otp",
+  );
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  function changeMode(nextMode: typeof mode) {
+    setMode(nextMode);
+    setSent(false);
+    setOtp("");
+    setError("");
+    setNotice("");
+  }
 
   async function sendCode(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -56,6 +69,80 @@ export function EmailSignIn({
       onAuthenticated(email.trim());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not verify the sign-in code.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createAccount(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    setBusy(true);
+    try {
+      const { data, error: signUpError } = await authClient.signUp.email({
+        name: name.trim(),
+        email: email.trim(),
+        password,
+      });
+      if (signUpError) throw new Error(signUpError.message ?? "Could not create account. Please try again.");
+      if (!data?.user) throw new Error("Could not create account. Please try again.");
+      const { data: sessionData, error: sessionError } = await authClient.getSession();
+      if (sessionError) throw new Error(sessionError.message ?? "Could not restore your sign-in.");
+      if (sessionData?.user) {
+        onAuthenticated(email.trim());
+        return;
+      }
+      setOtp("");
+      setMode("verification");
+      setNotice("Check your email for a verification code or link.");
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : "Could not create account. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyEmailCode(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      const { error: verificationError } = await authClient.emailOtp.verifyEmail({
+        email: email.trim(),
+        otp: otp.trim(),
+      });
+      if (verificationError) throw new Error(verificationError.message ?? "Could not verify your email.");
+
+      const { data, error: sessionError } = await authClient.getSession();
+      if (sessionError) throw new Error(sessionError.message ?? "Could not restore your sign-in.");
+      if (data?.user) {
+        onAuthenticated(email.trim());
+      } else {
+        setMode("password");
+        setNotice("Email verified. Sign in with your password to continue.");
+      }
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : "Could not verify your email.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function continueAfterVerificationLink() {
+    setError("");
+    setBusy(true);
+    try {
+      const { data, error: sessionError } = await authClient.getSession();
+      if (sessionError) throw new Error(sessionError.message ?? "Could not restore your sign-in.");
+      if (data?.user) {
+        onAuthenticated(email.trim());
+      } else {
+        setMode("password");
+        setNotice("Email verified. Sign in with your password to continue.");
+      }
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : "Could not restore your sign-in.");
     } finally {
       setBusy(false);
     }
@@ -96,14 +183,35 @@ export function EmailSignIn({
 
   return (
     <form className="pin-panel" onSubmit={(event) => {
-      if (mode === "password") void signInWithPassword(event);
+      if (mode === "signup") void createAccount(event);
+      else if (mode === "verification") void verifyEmailCode(event);
+      else if (mode === "password") void signInWithPassword(event);
       else if (sent) void verifyCode(event);
       else void sendCode(event);
     }}>
-      <h2>{mode === "password" ? signInTitle : sent ? t("Enter your email code") : signInTitle}</h2>
+      <h2>
+        {mode === "signup" ? t("Create your account")
+          : mode === "verification" ? t("Verify your email")
+            : mode === "password" ? signInTitle
+              : sent ? t("Enter your email code") : signInTitle}
+      </h2>
+      {mode === "verification" && <p>{t(notice)}</p>}
       {sent && <p>{t("A one-time code was sent to {email}.", { email: email.trim() })}</p>}
-      {mode === "password" && notice && <div className="alert alert-info" role="status">{t(notice)}</div>}
-      {mode === "password" || !sent ? (
+      {notice && mode !== "verification" && <div className="alert alert-info" role="status">{t(notice)}</div>}
+      {mode === "signup" && (
+        <label className="field">
+          <span>{t("Your name")}</span>
+          <input
+            required
+            type="text"
+            autoComplete="name"
+            maxLength={120}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </label>
+      )}
+      {mode === "signup" || mode === "password" || (mode === "otp" && !sent) ? (
         <label className="field">
           <span>{t("Email address")}</span>
           <input
@@ -116,7 +224,7 @@ export function EmailSignIn({
             placeholder="you@example.com"
           />
         </label>
-      ) : (
+      ) : (mode === "verification" || (mode === "otp" && sent)) ? (
         <label className="field">
           <span>{t("One-time code")}</span>
           <input
@@ -128,14 +236,15 @@ export function EmailSignIn({
             onChange={(event) => setOtp(event.target.value)}
           />
         </label>
-      )}
-      {mode === "password" && (
+      ) : null}
+      {(mode === "signup" || mode === "password") && (
         <label className="field">
           <span>{t("Password")}</span>
           <input
             required
             type="password"
-            autoComplete="current-password"
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+            minLength={mode === "signup" ? 8 : undefined}
             maxLength={128}
             value={password}
             onChange={(event) => setPassword(event.target.value)}
@@ -145,19 +254,41 @@ export function EmailSignIn({
       {error && <div className="field-error" role="alert">{t(error)}</div>}
       <div className="pin-row">
         <button className="button button-primary" type="submit" disabled={busy}>
-          {busy ? t("Please wait...") : mode === "password" ? t("Sign in") : sent ? t("Verify & sign in") : t("Send sign-in code")}
+          {busy ? t("Please wait...")
+            : mode === "signup" ? t("Create account")
+              : mode === "verification" ? t("Verify email")
+                : mode === "password" ? t("Sign in")
+                  : sent ? t("Verify & sign in") : t("Send sign-in code")}
         </button>
         {mode === "otp" && sent && <button className="text-button" type="button" disabled={busy} onClick={() => { setSent(false); setOtp(""); setError(""); }}>{t("Change email")}</button>}
       </div>
+      {mode === "verification" && (
+        <button className="text-button" type="button" disabled={busy} onClick={() => void continueAfterVerificationLink()}>
+          {t("I clicked the verification link")}
+        </button>
+      )}
       {allowPassword && (
         <div className="sign-in-options">
           {mode === "password" ? (
             <>
-              <button className="text-button" type="button" disabled={busy} onClick={() => { setMode("reset"); setError(""); setNotice(""); }}>{t("Set or reset password")}</button>
-              <button className="text-button" type="button" disabled={busy} onClick={() => { setMode("otp"); setSent(false); setOtp(""); setError(""); setNotice(""); }}>{t("Use email code")}</button>
+              <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("reset")}>{t("Set or reset password")}</button>
+              <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("otp")}>{t("Use email code")}</button>
             </>
-          ) : (
-            <button className="text-button" type="button" disabled={busy} onClick={() => { setMode("password"); setSent(false); setOtp(""); setError(""); }}>{t("Use password")}</button>
+          ) : mode === "otp" ? (
+            <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("password")}>{t("Use password")}</button>
+          ) : mode === "signup" ? (
+            <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("password")}>
+              {t("Already have an account? Sign in")}
+            </button>
+          ) : mode === "verification" ? (
+            <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("password")}>
+              {t("Back to sign in")}
+            </button>
+          ) : null}
+          {allowSignUp && (mode === "password" || mode === "otp") && (
+            <button className="text-button" type="button" disabled={busy} onClick={() => changeMode("signup")}>
+              {t("New family? Create an account")}
+            </button>
           )}
         </div>
       )}

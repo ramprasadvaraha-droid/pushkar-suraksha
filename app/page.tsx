@@ -604,6 +604,7 @@ export default function HomePage() {
                 {authReady && !signedIn && !visibleConfigError && (
                   <EmailSignIn
                     allowPassword
+                    allowSignUp
                     onAuthenticated={(email) => {
                       setConfigError("");
                       setLoading(true);
