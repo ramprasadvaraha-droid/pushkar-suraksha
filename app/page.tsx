@@ -61,10 +61,10 @@ function RegistrationForm({ onRegistered, busy, onBusyChange, initialPhone }: {
   initialPhone: string;
 }) {
   const { t } = useLanguage();
-  const [familyName, setFamilyName] = useState("Ramulu Family");
+  const [familyName, setFamilyName] = useState("");
   const [phone, setPhone] = useState(initialPhone);
   const [alternativePhone, setAlternativePhone] = useState("");
-  const [district, setDistrict] = useState("East Godavari");
+  const [district, setDistrict] = useState("");
   const [secret, setSecret] = useState("");
   const [faceSearchConsent, setFaceSearchConsent] = useState(false);
   const [members, setMembers] = useState<RegistrationMember[]>([
@@ -189,7 +189,6 @@ function RegistrationForm({ onRegistered, busy, onBusyChange, initialPhone }: {
           <div className="phone-input"><span>+91</span><input
             required inputMode="numeric" autoComplete="tel-national" maxLength={10} value={phone}
             onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))}
-            placeholder="98765 43210"
           /></div>
         </label>
         <label className="field">
@@ -197,7 +196,6 @@ function RegistrationForm({ onRegistered, busy, onBusyChange, initialPhone }: {
           <div className="phone-input"><span>+91</span><input
             inputMode="numeric" autoComplete="tel-national" maxLength={10} value={alternativePhone}
             onChange={(event) => setAlternativePhone(event.target.value.replace(/\D/g, "").slice(0, 10))}
-            placeholder="98765 43210"
           /></div>
         </label>
         <label className="field">
@@ -272,7 +270,7 @@ function RegistrationForm({ onRegistered, busy, onBusyChange, initialPhone }: {
           <input
             required minLength={3} maxLength={120} value={secret}
             onChange={(event) => setSecret(event.target.value)}
-            placeholder={t("e.g. A birthmark on the left hand")}
+            placeholder={t("A mole on the left side chin")}
           />
         </label>
         <p className="privacy-note">{t("This secret is not printed on the slip. Only a hint is shown.")}</p>

@@ -130,7 +130,7 @@ const translations: Record<string, string> = {
   "Secret verification": "రహస్య ధృవీకరణ",
   "Verify the parent before handing over a child.": "పిల్లవాడిని అప్పగించే ముందు తల్లిదండ్రులను ధృవీకరించండి.",
   "Only your family knows": "మీ కుటుంబానికి మాత్రమే తెలిసినది",
-  "e.g. A birthmark on the left hand": "ఉదా. ఎడమ చేతిపై పుట్టుమచ్చ",
+  "A mole on the left side chin": "ఎడమ సైడ్ నుదుటిపై ముల్లు",
   "This secret is not printed on the slip. Only a hint is shown.": "ఈ రహస్యం స్లిప్‌పై ముద్రించబడదు. సూచన మాత్రమే కనిపిస్తుంది.",
   "After registration, you will receive a family number and a printable safety slip for each member.": "నమోదు తర్వాత కుటుంబ నంబర్ మరియు ప్రతి సభ్యునికి ముద్రించగల భద్రతా స్లిప్ లభిస్తాయి.",
   "Register family": "కుటుంబాన్ని నమోదు చేయండి",

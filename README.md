@@ -39,7 +39,7 @@ A mobile-first Pushkaram family-safety PWA built with the patched Next.js App Ro
 
 This app no longer uses Supabase. Existing Supabase projects, data, Auth identities, and Storage objects are not deleted or migrated by this code change. The linked Neon app tables were empty when this migration was prepared.
 
-The registration form starts with **Ramulu Family** as an editable family-name example. On a fresh database the first family number is `PK-FAM-0842`; later four-digit numbers are randomly allocated under a database lock, with a unique constraint preventing duplicates. Each member receives a unique number such as `PK-08421`.
+The family name, phone numbers, and home district fields start empty. On a fresh database the first family number is `PK-FAM-0842`; later four-digit numbers are randomly allocated under a database lock, with a unique constraint preventing duplicates. Each member receives a unique number such as `PK-08421`.
 
 ## Deploy to Hostinger
 
