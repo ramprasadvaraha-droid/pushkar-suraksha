@@ -18,7 +18,22 @@ interface PhotoUploaderProps {
   disabled?: boolean;
 }
 
-const FACE_ERROR = "Face not visible. Please retake the photo.";
+const PHOTO_READ_ERROR = "Could not read the photo. Please choose another image.";
+
+async function loadPhotoImage(file: File): Promise<HTMLImageElement> {
+  const imageUrl = URL.createObjectURL(file);
+  try {
+    const image = new window.Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error(PHOTO_READ_ERROR));
+      image.src = imageUrl;
+    });
+    return image;
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
 
 async function validatePhoto(file: File): Promise<void> {
   if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
@@ -26,55 +41,36 @@ async function validatePhoto(file: File): Promise<void> {
   }
   if (file.size > 10 * 1024 * 1024) throw new Error("Photo must be smaller than 10 MB.");
 
-  const image = await createImageBitmap(file);
-  if (image.width < 240 || image.height < 240) {
-    image.close();
-    throw new Error("Retake the photo; it is blurry.");
-  }
+  const image = await loadPhotoImage(file);
+  if (image.naturalWidth < 240 || image.naturalHeight < 240) throw new Error("Retake the photo; it is blurry.");
   const canvas = document.createElement("canvas");
   canvas.width = 160;
   canvas.height = 160;
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) {
-    image.close();
-    throw new Error("Could not check the photo. Try another browser.");
-  }
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  image.close();
-  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-  const luminance = new Float32Array(canvas.width * canvas.height);
-  for (let index = 0, pixel = 0; index < pixels.length; index += 4, pixel += 1) {
-    luminance[pixel] = 0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2];
-  }
-  let edgeSum = 0;
-  let edgeSquares = 0;
-  let samples = 0;
-  for (let y = 1; y < canvas.height - 1; y += 1) {
-    for (let x = 1; x < canvas.width - 1; x += 1) {
-      const position = y * canvas.width + x;
-      const laplacian = 4 * luminance[position] - luminance[position - 1] -
-        luminance[position + 1] - luminance[position - canvas.width] -
-        luminance[position + canvas.width];
-      edgeSum += laplacian;
-      edgeSquares += laplacian * laplacian;
-      samples += 1;
+  if (context) {
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const luminance = new Float32Array(canvas.width * canvas.height);
+    for (let index = 0, pixel = 0; index < pixels.length; index += 4, pixel += 1) {
+      luminance[pixel] = 0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2];
     }
+    let edgeSum = 0;
+    let edgeSquares = 0;
+    let samples = 0;
+    for (let y = 1; y < canvas.height - 1; y += 1) {
+      for (let x = 1; x < canvas.width - 1; x += 1) {
+        const position = y * canvas.width + x;
+        const laplacian = 4 * luminance[position] - luminance[position - 1] -
+          luminance[position + 1] - luminance[position - canvas.width] -
+          luminance[position + canvas.width];
+        edgeSum += laplacian;
+        edgeSquares += laplacian * laplacian;
+        samples += 1;
+      }
+    }
+    const variance = edgeSquares / samples - (edgeSum / samples) ** 2;
+    if (variance < 22) throw new Error("The photo is blurry. Please retake it.");
   }
-  const variance = edgeSquares / samples - (edgeSum / samples) ** 2;
-  if (variance < 22) throw new Error("The photo is blurry. Please retake it.");
-
-  const Detector = (window as Window & {
-    FaceDetector?: new (options?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
-      detect: (source: ImageBitmap) => Promise<{ boundingBox: { width: number; height: number } }[]>;
-    };
-  }).FaceDetector;
-  if (!Detector) {
-    throw new Error("For face verification, use the latest Chrome browser.");
-  }
-  const bitmap = await createImageBitmap(file);
-  const faces = await new Detector({ fastMode: true, maxDetectedFaces: 10 }).detect(bitmap);
-  bitmap.close();
-  if (!faces.length) throw new Error(FACE_ERROR);
 }
 
 export function PhotoUploader({ choices, value, onChange, disabled = false }: PhotoUploaderProps) {
@@ -100,7 +96,7 @@ export function PhotoUploader({ choices, value, onChange, disabled = false }: Ph
       onChange(type, file);
       setProgress((previous) => ({ ...previous, [type]: 100 }));
     } catch (error) {
-      const message = error instanceof Error ? error.message : FACE_ERROR;
+      const message = error instanceof Error ? error.message : PHOTO_READ_ERROR;
       setErrors((previous) => ({ ...previous, [type]: t(message) }));
       onChange(type, undefined);
       setProgress((previous) => ({ ...previous, [type]: 0 }));
