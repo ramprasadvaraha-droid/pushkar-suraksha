@@ -1,6 +1,7 @@
 import { randomInt } from "node:crypto";
 import { NextResponse } from "next/server";
 import { withTransaction } from "@/lib/db";
+import { assertFaceSearchConfigured } from "@/lib/face-search";
 import { apiError, getAuthenticatedUser, isServerConfigured } from "@/lib/server-neon";
 import type { MemberInput } from "@/lib/types";
 
@@ -11,6 +12,12 @@ export async function POST(request: Request) {
   if (!isServerConfigured()) return apiError("Server configuration is incomplete. Check the README environment setup.", 503);
   const user = await getAuthenticatedUser();
   if (!user) return apiError("Session expired. Please try again.", 401);
+  try {
+    assertFaceSearchConfigured();
+  } catch (error) {
+    console.error("Face-search service configuration is incomplete.", error);
+    return apiError("Secure face search is not available. Please contact the festival help desk.", 503);
+  }
 
   let body: {
     familyName?: string;
@@ -18,6 +25,7 @@ export async function POST(request: Request) {
     alternativePhone?: string | null;
     district?: string;
     secret?: string;
+    faceSearchConsent?: boolean;
     members?: MemberInput[];
   };
   try {
@@ -34,6 +42,9 @@ export async function POST(request: Request) {
           body.alternativePhone === body.phone)) ||
       !body.secret?.trim() || body.secret.trim().length < 3 || body.secret.trim().length > 120) {
     return apiError("Check the family name, primary and alternative mobile numbers, district, and verification secret.");
+  }
+  if (body.faceSearchConsent !== true) {
+    return apiError("Explicit face-search consent is required to register this family.", 400);
   }
   if (!Array.isArray(body.members) || body.members.length < 1 || body.members.length > 9) {
     return apiError("Add between 1 and 9 family members.");
@@ -89,12 +100,13 @@ export async function POST(request: Request) {
         district: string;
       }>(
         `insert into public.families (
-           owner_id, family_name, phone, alternative_phone, district, family_number, verification_secret_hash, verification_hint
+           owner_id, family_name, phone, alternative_phone, district, family_number,
+           verification_secret_hash, verification_hint, face_search_consent, face_search_consent_at, face_search_consent_version
          )
          values (
            $1, $2, $3, $4, $5, $6,
            crypt(encode(digest(lower(trim($7)), 'sha256'), 'hex'), gen_salt('bf')),
-           left(trim($7), 1) || '•••'
+           left(trim($7), 1) || '•••', true, now(), 'face-search-v1'
          )
          returning id, family_name, phone, alternative_phone, district`,
         [user.id, familyName, phone, alternativePhone, district, familyNumber, secret],

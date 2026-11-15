@@ -1,0 +1,7 @@
+fastapi==0.115.12
+faiss-cpu==1.12.0
+cryptography==45.0.7
+numpy==1.26.4
+opencv-contrib-python-headless==4.11.0.86
+python-multipart==0.0.20
+uvicorn[standard]==0.34.2

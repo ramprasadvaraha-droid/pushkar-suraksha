@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AccountSignIn } from "@/components/AccountSignIn";
 import { PasswordResetForm } from "@/components/PasswordResetForm";
-import { authClient } from "@/lib/auth/client";
+import { getAppAuthUser, signOutApp } from "@/lib/auth/app-client";
 import { LanguageSwitcher, useLanguage, type Translator } from "@/lib/i18n";
 
 interface MissingItem {
@@ -16,6 +16,15 @@ interface MissingItem {
   dressPhotoUrl: string | null;
   ghat: string;
   missingAt: string;
+}
+
+interface FaceSearchCandidate {
+  memberId: string;
+  memberNumber: string;
+  photoUrl: string;
+  ghat: string;
+  missingAt: string;
+  similarity: number;
 }
 
 interface VolunteerProfile {
@@ -90,6 +99,9 @@ export default function VolunteerPage() {
   const [pendingMember, setPendingMember] = useState<string | null>(null);
   const [brokenPhotos, setBrokenPhotos] = useState<string[]>([]);
   const [showPasswordSetup, setShowPasswordSetup] = useState(false);
+  const [faceSearchBusy, setFaceSearchBusy] = useState(false);
+  const [faceSearchError, setFaceSearchError] = useState("");
+  const [faceSearchResults, setFaceSearchResults] = useState<FaceSearchCandidate[] | null>(null);
 
   const loadMissing = useCallback(async (cacheKey: string, initial = false) => {
     if (initial) setLoading(true);
@@ -160,13 +172,11 @@ export default function VolunteerPage() {
     let active = true;
     void (async () => {
       try {
-        const { data, error: sessionError } = await authClient.getSession();
-        if (sessionError) throw new Error(sessionError.message ?? "Could not restore sign-in.");
-        const user = data?.user;
-        if (user?.emailVerified) {
+        const user = await getAppAuthUser();
+        if (user) {
           if (active) {
             setAuthName(user.name);
-            setAuthEmail(user.email);
+            setAuthEmail(user.email ?? null);
             setSignedIn(true);
           }
           await refreshProfile(true);
@@ -192,9 +202,44 @@ export default function VolunteerPage() {
     return items.filter((item) => item.memberNumber.toUpperCase().includes(normalized));
   }, [items, query]);
 
+  async function searchFace(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const file = new FormData(form).get("photo");
+    setFaceSearchError("");
+    setFaceSearchResults(null);
+    if (!(file instanceof File) || !file.size) {
+      setFaceSearchError(t("Choose a face photo to search."));
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      setFaceSearchError(t("Search photo must be 4 MB or smaller."));
+      return;
+    }
+
+    setFaceSearchBusy(true);
+    try {
+      const response = await fetch("/api/volunteer/face-search", {
+        method: "POST",
+        body: new FormData(form),
+        cache: "no-store",
+      });
+      const body = await response.json() as {
+        candidates?: FaceSearchCandidate[];
+        error?: string;
+      };
+      if (!response.ok) throw new Error(body.error ?? "Face search could not be completed.");
+      setFaceSearchResults(body.candidates ?? []);
+      form.reset();
+    } catch (cause) {
+      setFaceSearchError(errorText(cause, t));
+    } finally {
+      setFaceSearchBusy(false);
+    }
+  }
+
   async function register(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
     setError("");
     setRegistering(true);
     try {
@@ -202,7 +247,7 @@ export default function VolunteerPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          fullName: form.get("fullName"),
+          fullName: authName,
         }),
       });
       const body = await response.json() as { error?: string };
@@ -304,7 +349,7 @@ export default function VolunteerPage() {
   async function logout() {
     setError("");
     try {
-      const { error: signOutError } = await authClient.signOut();
+      const { error: signOutError } = await signOutApp();
       if (signOutError) throw new Error(signOutError.message ?? "Sign out could not be completed.");
     } catch (cause) {
       setError(errorText(cause, t));
@@ -355,7 +400,7 @@ export default function VolunteerPage() {
             signUpPrompt="New volunteer? Create an account"
             onAuthenticated={(account) => {
               setAuthName(account.name);
-              setAuthEmail(account.email);
+              setAuthEmail(account.email ?? null);
               setLoading(true);
               setError("");
               void refreshProfile(true)
@@ -370,10 +415,7 @@ export default function VolunteerPage() {
             <form className="pin-panel" onSubmit={(event) => void register(event)}>
               <h2>{t("Volunteer registration")}</h2>
               <p>{t("Submit your verified account for organizer approval before you can access missing-person reports.")}</p>
-              <label className="field">
-                <span>{t("Full name")}</span>
-                <input name="fullName" required minLength={2} maxLength={100} autoComplete="name" defaultValue={authName} />
-              </label>
+              <p><strong>{t("Full Name")}:</strong> {authName}</p>
               {!organizerConfigured && <div className="alert alert-error" role="alert">{t("Volunteer organizer emails are not configured. Contact the festival coordinator.")}</div>}
               <button className="button button-primary" type="submit" disabled={registering || !organizerConfigured}>
                 {registering ? t("Submitting...") : t("Submit for organizer approval")}
@@ -421,6 +463,43 @@ export default function VolunteerPage() {
               <div><strong>{counts?.personal ?? 0}</strong><span>{t("Your verified handovers")}</span></div>
               <div><strong>{counts?.total ?? 0}</strong><span>{t("Event total")}</span></div>
             </div>
+            <section className="face-search-panel" aria-labelledby="face-search-heading">
+              <h2 id="face-search-heading">{t("Search by face")}</h2>
+              <p>{t("Upload one clear face photo. The search photo is processed temporarily and is not saved.")}</p>
+              <p className="face-search-warning">{t("Results are similarity suggestions, not identity proof. Always compare manually and use guardian-secret verification before a handover.")}</p>
+              <form className="face-search-form" onSubmit={(event) => void searchFace(event)}>
+                <input
+                  type="file"
+                  name="photo"
+                  accept="image/jpeg,image/png,image/webp"
+                  capture="environment"
+                  required
+                  disabled={faceSearchBusy}
+                />
+                <button className="button button-primary" type="submit" disabled={faceSearchBusy}>
+                  {faceSearchBusy ? t("Searching faces...") : t("Search missing members")}
+                </button>
+              </form>
+              {faceSearchError && <p className="field-error" role="alert">{faceSearchError}</p>}
+              {faceSearchResults && (
+                <div className="face-search-results" role="status">
+                  {!faceSearchResults.length && <p>{t("No likely candidates. Continue checking the missing-person list manually.")}</p>}
+                  {faceSearchResults.map((candidate) => (
+                    <article className="face-search-result" key={candidate.memberId}>
+                      <Image src={candidate.photoUrl} alt={`${t("Member number")} ${candidate.memberNumber}`} width={48} height={54} unoptimized />
+                      <div>
+                        <strong className="number-mono">{candidate.memberNumber}</strong>
+                        <span>{t("Last seen: {ghat}", { ghat: candidate.ghat })}</span>
+                        <span>{t("Similarity score: {score}", { score: candidate.similarity.toFixed(3) })}</span>
+                      </div>
+                      <button className="text-button" type="button" onClick={() => setQuery(candidate.memberNumber)}>
+                        {t("Open report")}
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
             <div className="volunteer-toolbar">
               <input className="search-input" aria-label={t("Search by member number")} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="PK-08423" />
               <span className="volunteer-count">{t("{count} active", { count: filtered.length })}</span>

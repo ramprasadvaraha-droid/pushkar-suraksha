@@ -6,11 +6,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AccountSignIn } from "@/components/AccountSignIn";
 import { DeleteFamilyPhotos } from "@/components/DeleteFamilyPhotos";
+import { FamilyLanding } from "@/components/FamilyLanding";
 import { MemberCard } from "@/components/MemberCard";
 import { NumberBadge } from "@/components/NumberBadge";
 import { PasswordResetForm } from "@/components/PasswordResetForm";
 import { PhotoUploader, type PhotoChoice } from "@/components/PhotoUploader";
-import { authClient } from "@/lib/auth/client";
+import { getAppAuthUser, signOutApp } from "@/lib/auth/app-client";
 import { LanguageSwitcher, useLanguage, type Translator } from "@/lib/i18n";
 import { uploadPhoto } from "@/lib/upload-photo";
 import type { FamilyRecord, Gender, MemberInput, MemberRecord, Relation } from "@/lib/types";
@@ -21,7 +22,10 @@ type RegistrationMember = MemberInput & { photos: Record<string, File | undefine
 const relations: Relation[] = ["Father", "Mother", "Son", "Daughter", "Other"];
 const genders: Gender[] = ["Male", "Female", "Other"];
 const ghats = ["Pushkar Ghat", "Kotilingala Ghat", "Gowthami Ghat", "Markandeya Ghat", "Saraswathi Ghat"];
-const adultPhoto: PhotoChoice[] = [{ type: "face_front", title: "Face front", hint: "Clear face, look straight at the camera" }];
+const adultPhoto: PhotoChoice[] = [
+  { type: "face_front", title: "Face front", hint: "Clear face, look straight at the camera" },
+  { type: "full_body", title: "Full body", hint: "From head to feet" },
+];
 const childPhotos: PhotoChoice[] = [
   { type: "face_front", title: "Face front close", hint: "Face should be clear" },
   { type: "full_body", title: "Full body", hint: "From head to feet" },
@@ -62,6 +66,7 @@ function RegistrationForm({ onRegistered, busy, onBusyChange, initialPhone }: {
   const [alternativePhone, setAlternativePhone] = useState("");
   const [district, setDistrict] = useState("East Godavari");
   const [secret, setSecret] = useState("");
+  const [faceSearchConsent, setFaceSearchConsent] = useState(false);
   const [members, setMembers] = useState<RegistrationMember[]>([
     { name: "Ramulu", age: 45, relation: "Father", gender: "Male", photos: {} },
   ]);
@@ -88,6 +93,10 @@ function RegistrationForm({ onRegistered, busy, onBusyChange, initialPhone }: {
       setError(t("Secret must be at least 3 characters."));
       return;
     }
+    if (!faceSearchConsent) {
+      setError(t("Explicit face-search consent is required to register this family."));
+      return;
+    }
     for (let index = 0; index < members.length; index += 1) {
       const required = members[index].age < 18 ? childPhotos : adultPhoto;
       const missing = required.find((choice) => !members[index].photos[choice.type]);
@@ -109,6 +118,7 @@ function RegistrationForm({ onRegistered, busy, onBusyChange, initialPhone }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           familyName, phone, alternativePhone: alternativePhone || null, district, secret,
+          faceSearchConsent,
           members: members.map(({ name, age, relation, gender }) => ({ name, age, relation, gender })),
         }),
       });
@@ -119,7 +129,9 @@ function RegistrationForm({ onRegistered, busy, onBusyChange, initialPhone }: {
       const photos: { memberId: string; photoType: string; storagePath: string }[] = [];
       for (let index = 0; index < members.length; index += 1) {
         const registeredMember = createdFamily.members[index];
-        for (const [photoType, file] of Object.entries(members[index].photos)) {
+        const requiredPhotos = members[index].age < 18 ? childPhotos : adultPhoto;
+        for (const { type: photoType } of requiredPhotos) {
+          const file = members[index].photos[photoType];
           if (!file) continue;
           const storagePath = await uploadPhoto(file, registeredMember.id, photoType);
           uploadedPaths.push(storagePath);
@@ -229,8 +241,8 @@ function RegistrationForm({ onRegistered, busy, onBusyChange, initialPhone }: {
                 </select>
               </label>
               <div className="photo-rule">
-                <strong>{t(member.age < 18 ? "Child photos · 4 required" : "Adult photo · 1 required")}</strong>
-                <span>{t(member.age < 18 ? "Face + full body + side + family photo" : "Face close-up, clear photo")}</span>
+                <strong>{t(member.age < 18 ? "Child photos · 4 required" : "Adult photos · 2 required")}</strong>
+                <span>{t(member.age < 18 ? "Face + full body + side + family photo" : "Face close-up + full-body photo")}</span>
               </div>
               <PhotoUploader
                 choices={member.age < 18 ? childPhotos : adultPhoto}
@@ -264,6 +276,18 @@ function RegistrationForm({ onRegistered, busy, onBusyChange, initialPhone }: {
           />
         </label>
         <p className="privacy-note">{t("This secret is not printed on the slip. Only a hint is shown.")}</p>
+      </section>
+      <section className="form-section face-search-consent-section">
+        <label className="photo-delete-checkbox">
+          <input
+            type="checkbox"
+            required
+            checked={faceSearchConsent}
+            onChange={(event) => setFaceSearchConsent(event.target.checked)}
+            disabled={busy}
+          />
+          <span>{t("I am an adult member or the parent/legal guardian for every child in this family. I explicitly consent to creating and comparing a secure face template from each family member's face photo to help reunite missing people with their families. Search results are suggestions only and do not establish identity. An approved volunteer must still verify the family secret. Templates are kept until the photos are deleted or expire.")}</span>
+        </label>
       </section>
       {error && <div className="alert alert-error" role="alert">{error}</div>}
       <div className="form-footnote">{t("After registration, you will receive a family number and a printable safety slip for each member.")}</div>
@@ -528,13 +552,11 @@ export default function HomePage() {
 
   useEffect(() => {
     let active = true;
-    void authClient.getSession().then(({ data, error }) => {
-      if (error) throw new Error(error.message);
+    void getAppAuthUser().then((user) => {
       if (active) {
-        const user = data?.user;
-        const hasVerifiedIdentity = Boolean(user?.emailVerified);
+        const hasVerifiedIdentity = Boolean(user?.emailVerified || user?.phoneNumberVerified);
         setSignedIn(hasVerifiedIdentity);
-        setSignedInEmail(user?.emailVerified ? user.email : "");
+        setSignedInEmail(user?.emailVerified ? user.email ?? "" : "");
         setAuthReady(true);
         if (!hasVerifiedIdentity) setLoading(false);
       }
@@ -579,7 +601,7 @@ export default function HomePage() {
   }
 
   async function signOut() {
-    const { error } = await authClient.signOut();
+    const { error } = await signOutApp();
     if (error) {
       setConfigError(t(error.message ?? "Could not sign out. Please try again."));
       return;
@@ -589,6 +611,20 @@ export default function HomePage() {
     setSignedInEmail("");
     setShowPasswordSetup(false);
     setSignedIn(false);
+  }
+
+  if (activeTab === "family" && authReady && !signedIn && !visibleConfigError) {
+    return (
+      <FamilyLanding
+        onAuthenticated={(account) => {
+          setConfigError("");
+          setLoading(true);
+          setSignedInEmail(account.email ?? "");
+          setSignedIn(true);
+        }}
+        onShowFoundBoard={() => setActiveTab("found")}
+      />
+    );
   }
 
   return (

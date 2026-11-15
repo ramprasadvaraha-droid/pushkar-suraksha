@@ -2,14 +2,21 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { apiError, getAuthenticatedUser, isServerConfigured } from "@/lib/server-neon";
 import { deletePhotos } from "@/lib/neon-storage";
+import { deleteFaceEmbeddings } from "@/lib/face-search";
 
 interface FamilyRow {
   id: string;
+  face_search_consent: boolean;
+  face_search_index_pending: boolean;
 }
 
 interface PhotoRow {
   id: string;
   storage_path: string;
+}
+
+interface MemberRow {
+  id: string;
 }
 
 export async function DELETE(request: Request) {
@@ -29,7 +36,8 @@ export async function DELETE(request: Request) {
 
   try {
     const { rows: families } = await query<FamilyRow>(
-      `select id from public.families where owner_id = $1 order by created_at desc limit 1`,
+      `select id, face_search_consent, face_search_index_pending
+       from public.families where owner_id = $1 order by created_at desc limit 1`,
       [user.id],
     );
     const family = families[0];
@@ -39,6 +47,31 @@ export async function DELETE(request: Request) {
       `select id, storage_path from public.photos where family_id = $1 and owner_id = $2`,
       [family.id, user.id],
     );
+    const { rows: members } = await query<MemberRow>(
+      "select id from public.members where family_id = $1 and owner_id = $2",
+      [family.id, user.id],
+    );
+
+    if (family.face_search_consent || family.face_search_index_pending) {
+      await query(
+        `update public.families
+         set face_search_consent = false, face_search_consent_at = null,
+             face_search_consent_version = null, face_search_index_pending = true
+         where id = $1 and owner_id = $2`,
+        [family.id, user.id],
+      );
+      try {
+        await deleteFaceEmbeddings(members.map((member) => member.id));
+        await query(
+          "update public.families set face_search_index_pending = false where id = $1 and owner_id = $2",
+          [family.id, user.id],
+        );
+      } catch (indexError) {
+        console.error("Family face-template deletion failed.", indexError);
+        return apiError("Face templates could not be removed from search. Photos were kept; please retry.", 502);
+      }
+    }
+
     if (!photos.length) return NextResponse.json({ deleted: 0 });
 
     try {

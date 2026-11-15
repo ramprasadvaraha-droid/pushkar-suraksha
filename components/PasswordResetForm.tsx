@@ -73,7 +73,7 @@ export function PasswordResetForm({
 
   return (
     <div className="pin-panel password-reset-panel">
-      <h2>{t("Set or reset password")}</h2>
+      <h2>{t("Forgot password?")}</h2>
       <p>{t("Verify your email with a code, then choose a password for future sign-ins.")}</p>
       {!sent ? (
         <form onSubmit={(event) => void sendCode(event)}>

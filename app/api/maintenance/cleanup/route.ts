@@ -3,10 +3,19 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { isServerConfigured } from "@/lib/server-neon";
 import { deletePhotos } from "@/lib/neon-storage";
+import { deleteFaceEmbeddings } from "@/lib/face-search";
 
 interface ExpiredPhoto {
   id: string;
   storage_path: string;
+  member_id: string;
+  photo_type: string;
+  face_search_consent: boolean;
+}
+
+interface PendingFaceCleanup {
+  family_id: string;
+  member_ids: string[];
 }
 
 export async function GET(request: Request) {
@@ -25,11 +34,39 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { rows } = await query<ExpiredPhoto>(
-      `select id, storage_path from public.photos
-       where expires_at <= now() order by expires_at limit 500`,
+    const { rows: pendingFamilies } = await query<PendingFaceCleanup>(
+      `select f.id as family_id, array_agg(m.id) as member_ids
+       from public.families f
+       join public.members m on m.family_id = f.id and m.owner_id = f.owner_id
+       where f.face_search_index_pending = true
+       group by f.id`,
     );
-    if (!rows.length) return NextResponse.json({ deleted: 0 });
+    for (const family of pendingFamilies) {
+      await deleteFaceEmbeddings(family.member_ids);
+      await query(
+        `update public.families set face_search_index_pending = false
+         where id = $1 and face_search_consent = false`,
+        [family.family_id],
+      );
+    }
+
+    const { rows } = await query<ExpiredPhoto>(
+      `select p.id, p.storage_path, p.member_id, p.photo_type, f.face_search_consent
+       from public.photos p
+       join public.families f on f.id = p.family_id and f.owner_id = p.owner_id
+       where p.expires_at <= now() order by p.expires_at limit 500`,
+    );
+    if (!rows.length) {
+      await query("delete from public.face_search_audit where searched_at < now() - interval '90 days'");
+      return NextResponse.json({ deleted: 0 });
+    }
+
+    const expiredFaceMembers = [...new Set(rows
+      .filter((photo) => photo.photo_type === "face_front" && photo.face_search_consent)
+      .map((photo) => photo.member_id))];
+    if (expiredFaceMembers.length) {
+      await deleteFaceEmbeddings(expiredFaceMembers);
+    }
 
     try {
       await deletePhotos(rows.map((photo) => photo.storage_path));
@@ -40,6 +77,7 @@ export async function GET(request: Request) {
 
     const ids = rows.map((photo) => photo.id);
     await query("delete from public.photos where id = any($1::uuid[])", [ids]);
+    await query("delete from public.face_search_audit where searched_at < now() - interval '90 days'");
     return NextResponse.json({ deleted: rows.length });
   } catch (error) {
     console.error("Expired family photo cleanup failed.", error);

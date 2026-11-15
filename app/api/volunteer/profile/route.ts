@@ -59,8 +59,12 @@ export async function POST(request: Request) {
   if (!isServerConfigured()) return apiError("Server configuration is incomplete. Check the README environment setup.", 503);
   const user = await getAuthenticatedUser();
   if (!user) return apiError("Session expired. Please sign in again.", 401);
-  if (user.emailVerified !== true || !user.email?.trim()) {
-    return apiError("Verify your email address before volunteer registration.", 403);
+  const email = user.emailVerified === true ? user.email?.trim().toLowerCase() || null : null;
+  const phone = user.phoneNumberVerified === true
+    ? user.phoneNumber?.replace(/^\+91/, "") || null
+    : null;
+  if (!email && !phone) {
+    return apiError("Verify your email address or mobile number before volunteer registration.", 403);
   }
   if (!getVolunteerOrganizerEmails().length) {
     return apiError("Volunteer organizer access is not configured. Contact the festival coordinator.", 503);
@@ -76,8 +80,6 @@ export async function POST(request: Request) {
   if (fullName.length < 2 || fullName.length > 100) {
     return apiError("Enter your full name (2 to 100 characters).");
   }
-  const email = user.email.trim().toLowerCase();
-  const phone = null;
   const organizer = email ? isVolunteerOrganizer(email) : false;
 
   try {

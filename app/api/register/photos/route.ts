@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query, withTransaction } from "@/lib/db";
 import { apiError, getAuthenticatedUser, isServerConfigured } from "@/lib/server-neon";
 import { createPhotoUrl, deletePhotos, verifyPhoto } from "@/lib/neon-storage";
+import { deleteFaceEmbeddings, enrollFacePhoto } from "@/lib/face-search";
 import { PHOTO_TYPES, type PhotoType } from "@/lib/types";
 
 interface UploadedPhoto {
@@ -18,6 +19,7 @@ interface FamilyRow {
   district: string;
   family_number: string;
   verification_hint: string;
+  face_search_consent: boolean;
 }
 
 interface MemberRow {
@@ -55,12 +57,16 @@ export async function POST(request: Request) {
 
   try {
     const { rows: familyRows } = await query<FamilyRow>(
-      `select id, family_name, phone, alternative_phone, district, family_number, verification_hint
+      `select id, family_name, phone, alternative_phone, district, family_number, verification_hint,
+              face_search_consent
        from public.families where id = $1 and owner_id = $2`,
       [body.familyId, user.id],
     );
     const family = familyRows[0];
     if (!family) return apiError("This family registration was not found.", 404);
+    if (!family.face_search_consent) {
+      return apiError("Face-search consent is required before photos can be indexed.", 403);
+    }
 
     const { rows: members } = await query<MemberRow>(
       `select id, name, age, relation, gender, member_number, status
@@ -69,7 +75,7 @@ export async function POST(request: Request) {
     );
     const expected = new Map<string, Set<string>>();
     for (const member of members) {
-      expected.set(member.id, new Set(member.age < 18 ? PHOTO_TYPES : ["face_front"]));
+      expected.set(member.id, new Set(member.age < 18 ? PHOTO_TYPES : ["face_front", "full_body"]));
     }
     if (members.length < 1 || members.length > 9) return apiError("Family member list is invalid.", 409);
 
@@ -104,14 +110,36 @@ export async function POST(request: Request) {
     const paths = rows.map((row) => row.storagePath);
     const rollback = async () => {
       try {
+        await query(
+          `update public.families
+            set face_search_consent = false, face_search_consent_at = null,
+                face_search_consent_version = null, face_search_index_pending = true
+           where id = $1 and owner_id = $2`,
+          [family.id, user.id],
+        );
+        await deleteFaceEmbeddings(members.map((member) => member.id));
+        await query(
+          "update public.families set face_search_index_pending = false where id = $1 and owner_id = $2",
+          [family.id, user.id],
+        );
+      } catch (indexError) {
+        console.error("Failed to remove registration face templates; incomplete registration was retained.", indexError);
+        throw new Error(
+          "Face templates could not be removed from the search index. Contact the festival help desk before retrying.",
+          { cause: indexError },
+        );
+      }
+      try {
         await deletePhotos(paths);
       } catch (storageError) {
         console.error("Registration upload rollback failed.", storageError);
+        throw new Error("Uploaded photos could not be removed. Contact the festival help desk.", { cause: storageError });
       }
       try {
         await query("delete from public.families where id = $1 and owner_id = $2", [family.id, user.id]);
       } catch (deleteError) {
         console.error("Incomplete family registration rollback failed.", deleteError);
+        throw new Error("Incomplete family registration could not be removed. Contact the festival help desk.", { cause: deleteError });
       }
     };
 
@@ -133,6 +161,10 @@ export async function POST(request: Request) {
           );
         }
       });
+
+      for (const photo of rows.filter((row) => row.photoType === "face_front")) {
+        await enrollFacePhoto(photo.memberId, photo.storagePath);
+      }
 
       const { rows: photoRecords } = await query<PhotoRow>(
         `select member_id, photo_type, storage_path from public.photos
@@ -162,6 +194,11 @@ export async function POST(request: Request) {
     }
   } catch (error) {
     console.error("Registration photo processing failed.", error);
-    return apiError("Could not complete the family photo registration. Please try again.", 500);
+    return apiError(
+      error instanceof Error && error.message
+        ? error.message
+        : "Could not complete the family photo registration. Please try again.",
+      500,
+    );
   }
 }

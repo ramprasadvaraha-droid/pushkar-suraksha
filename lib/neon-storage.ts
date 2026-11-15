@@ -41,6 +41,15 @@ export async function verifyPhoto(key: string): Promise<void> {
   await getStorageClient().send(new HeadObjectCommand({ Bucket: PHOTO_BUCKET, Key: key }));
 }
 
+export async function downloadPhoto(key: string): Promise<{ bytes: Uint8Array; contentType: string }> {
+  const result = await getStorageClient().send(new GetObjectCommand({ Bucket: PHOTO_BUCKET, Key: key }));
+  if (!result.Body) throw new Error("Stored photo has no readable body.");
+  return {
+    bytes: await result.Body.transformToByteArray(),
+    contentType: result.ContentType ?? "application/octet-stream",
+  };
+}
+
 export async function createPhotoUrl(key: string, expiresIn = 3600): Promise<string> {
   return getSignedUrl(
     getStorageClient(),
