@@ -26,8 +26,9 @@ export async function POST(request: Request) {
       const { rows: [member] } = await client.query<{
         missing_log_id: string;
         ghat: string;
+        verification_method: "secret" | "coordinator";
       }>(
-        `select ml.id as missing_log_id, hv.ghat
+        `select ml.id as missing_log_id, hv.ghat, hv.verification_method
          from public.members m
          join public.missing_logs ml on ml.member_id = m.id and ml.found_at is null
          join public.volunteer_handover_verifications hv
@@ -57,9 +58,9 @@ export async function POST(request: Request) {
       }
       await client.query("update public.members set status = 'found' where id = $1", [memberId]);
       await client.query(
-        `insert into public.volunteer_handovers (missing_log_id, volunteer_id)
-         values ($1, $2)`,
-        [member.missing_log_id, volunteer.id],
+        `insert into public.volunteer_handovers (missing_log_id, volunteer_id, verification_method)
+         values ($1, $2, $3)`,
+        [member.missing_log_id, volunteer.id, member.verification_method],
       );
       await client.query(
         "delete from public.volunteer_handover_verifications where missing_log_id = $1",

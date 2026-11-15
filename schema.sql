@@ -76,12 +76,14 @@ create table if not exists public.volunteer_handover_verifications (
   missing_log_id uuid primary key references public.missing_logs(id) on delete cascade,
   volunteer_id uuid not null references public.volunteers(id) on delete cascade,
   ghat text not null check (length(trim(ghat)) between 2 and 100),
+  verification_method text not null default 'secret' check (verification_method in ('secret', 'coordinator')),
   verified_at timestamptz not null default now()
 );
 
 create table if not exists public.volunteer_handovers (
   missing_log_id uuid primary key references public.missing_logs(id) on delete cascade,
   volunteer_id uuid not null references public.volunteers(id) on delete restrict,
+  verification_method text not null default 'secret' check (verification_method in ('secret', 'coordinator')),
   handed_over_at timestamptz not null default now()
 );
 

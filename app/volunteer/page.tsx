@@ -52,8 +52,10 @@ interface PendingVolunteer {
 interface FoundState {
   ghat: string;
   verificationSecret: string;
+  coordinatorAttested: boolean;
   parentPhone: string;
   verified: boolean;
+  verificationMethod: "secret" | "coordinator" | null;
   confirmed: boolean;
 }
 
@@ -73,7 +75,15 @@ function errorText(error: unknown, t: Translator) {
 }
 
 function emptyFoundState(ghat: string): FoundState {
-  return { ghat, verificationSecret: "", parentPhone: "", verified: false, confirmed: false };
+  return {
+    ghat,
+    verificationSecret: "",
+    coordinatorAttested: false,
+    parentPhone: "",
+    verified: false,
+    verificationMethod: null,
+    confirmed: false,
+  };
 }
 
 export default function VolunteerPage() {
@@ -280,8 +290,16 @@ export default function VolunteerPage() {
     }
   }
 
-  async function verifyGuardian(item: MissingItem) {
+  async function verifyGuardian(item: MissingItem, verificationMethod: "secret" | "coordinator" = "secret") {
     const current = found[item.memberId] ?? emptyFoundState(item.ghat);
+    if (verificationMethod === "secret" && !current.verificationSecret.trim()) {
+      setError(t("Enter the family verification secret."));
+      return;
+    }
+    if (verificationMethod === "coordinator" && (!isOrganizer || !current.coordinatorAttested)) {
+      setError(t("Confirm you personally verified the guardian in person."));
+      return;
+    }
     setPendingMember(item.memberId);
     setError("");
     try {
@@ -292,17 +310,25 @@ export default function VolunteerPage() {
           memberId: item.memberId,
           ghat: current.ghat,
           verificationSecret: current.verificationSecret,
+          verificationMethod,
+          coordinatorAttested: current.coordinatorAttested,
         }),
       });
-      const body = await response.json() as { parentPhone?: string; error?: string };
+      const body = await response.json() as {
+        parentPhone?: string;
+        verificationMethod?: "secret" | "coordinator";
+        error?: string;
+      };
       if (!response.ok || !body.parentPhone) throw new Error(body.error ?? "Guardian verification could not be completed.");
       setFound((previous) => ({
         ...previous,
         [item.memberId]: {
           ...current,
           verificationSecret: "",
+          coordinatorAttested: false,
           parentPhone: body.parentPhone!,
           verified: true,
+          verificationMethod: body.verificationMethod ?? verificationMethod,
           confirmed: false,
         },
       }));
@@ -466,7 +492,7 @@ export default function VolunteerPage() {
             <section className="face-search-panel" aria-labelledby="face-search-heading">
               <h2 id="face-search-heading">{t("Search by face")}</h2>
               <p>{t("Upload one clear face photo. The search photo is processed temporarily and is not saved.")}</p>
-              <p className="face-search-warning">{t("Results are similarity suggestions, not identity proof. Always compare manually and use guardian-secret verification before a handover.")}</p>
+              <p className="face-search-warning">{t("Results are similarity suggestions, not identity proof. Always compare manually and verify the guardian before a handover.")}</p>
               <form className="face-search-form" onSubmit={(event) => void searchFace(event)}>
                 <input
                   type="file"
@@ -550,10 +576,15 @@ export default function VolunteerPage() {
                               {ghats.map((ghat) => <option key={ghat}>{ghat}</option>)}
                             </select>
                             <label className="found-secret-field">
-                              <span>{t("Guardian verification secret")}</span>
+                              <span>
+                                {t("Guardian verification secret")}{" "}
+                                <small>{t(isOrganizer ? "Required for this option" : "Required")}</small>
+                              </span>
                               <input
                                 type="password"
                                 autoComplete="off"
+                                required
+                                maxLength={120}
                                 value={state.verificationSecret}
                                 onChange={(event) => setFound((previous) => ({
                                   ...previous,
@@ -564,17 +595,43 @@ export default function VolunteerPage() {
                             </label>
                             <motion.button
                               className="button button-found" type="button" whileTap={{ scale: .97 }}
-                              disabled={pendingMember === item.memberId || offline}
+                              disabled={pendingMember === item.memberId || offline || !state.verificationSecret.trim()}
                               onClick={() => void verifyGuardian(item)}
                             >
                               {pendingMember === item.memberId ? t("Verifying...") : t("Verify guardian & show contact")}
                             </motion.button>
+                            {isOrganizer && (
+                              <div className="coordinator-fallback">
+                                <p>{t("Use this fallback only if the guardian has forgotten the secret. The coordinator must verify the guardian in person and complete the handover.")}</p>
+                                <label className="handover-check">
+                                  <input
+                                    type="checkbox"
+                                    checked={state.coordinatorAttested}
+                                    disabled={pendingMember === item.memberId || offline}
+                                    onChange={(event) => setFound((previous) => ({
+                                      ...previous,
+                                      [item.memberId]: { ...state, coordinatorAttested: event.target.checked },
+                                    }))}
+                                  />
+                                  <span>{t("I personally verified this guardian in person and will complete the handover.")}</span>
+                                </label>
+                                <motion.button
+                                  className="button button-found" type="button" whileTap={{ scale: .97 }}
+                                  disabled={pendingMember === item.memberId || offline || !state.coordinatorAttested}
+                                  onClick={() => void verifyGuardian(item, "coordinator")}
+                                >
+                                  {pendingMember === item.memberId ? t("Verifying...") : t("Coordinator verification & show contact")}
+                                </motion.button>
+                              </div>
+                            )}
                           </>
                         )}
                         {state.verified && (
                           <div className="handover-confirm">
-                            <h3>{t("Guardian verified")}</h3>
-                            <p>{t("Call the parent, then physically hand over the child before confirming below.")}</p>
+                            <h3>{t(state.verificationMethod === "coordinator" ? "Coordinator verified guardian in person" : "Guardian verified")}</h3>
+                            <p>{t(state.verificationMethod === "coordinator"
+                              ? "Stay with the verified guardian and physically hand over the child before confirming below."
+                              : "Call the parent, then physically hand over the child before confirming below.")}</p>
                             <a href={`tel:${state.parentPhone}`}>{t("Parent: +91 {phone}", { phone: state.parentPhone })}</a>
                             <label className="handover-check">
                               <input

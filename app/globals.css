@@ -416,7 +416,10 @@ h1, h2, h3, .brand-lockup strong { font-family: "Baloo 2", "Noto Sans Telugu", s
 .found-phone-card p { margin: 0; color: #52685b; font-size: 9px; }
 .ghat-select { width: 100%; min-height: 34px; margin: 5px 0; padding: 6px; border: 1px solid #d8c8a4; border-radius: 4px; background: #fffdf7; font-size: 9px; }
 .found-secret-field { display: grid; gap: 4px; margin: 2px 0 7px; color: #685b4a; font-size: 8px; font-weight: 700; }
+.found-secret-field small { color: #867b6b; font-size: 8px; font-weight: 400; }
 .found-secret-field input { min-height: 33px; padding: 7px; border: 1px solid #d8c8a4; border-radius: 4px; background: #fffdf7; font-size: 9px; font-weight: 400; }
+.coordinator-fallback { display: grid; gap: 7px; margin-top: 9px; padding: 9px; border: 1px solid #d8bd81; background: #fffaf0; }
+.coordinator-fallback > p { margin: 0; color: #685b4a; font-size: 9px; line-height: 1.45; }
 .volunteer-footer { padding: 18px; color: var(--muted); text-align: center; font-size: 9px; }
 .volunteer-back { color: var(--teal); font-weight: 700; }
 
